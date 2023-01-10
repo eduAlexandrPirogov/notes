@@ -102,3 +102,66 @@ ORM хорош для элементарных запросах (наприме�
 То есть, если брать вышеприведенные примеры, то желательно эти запросы обернуть в функции БД.
 
 Ну и пара примеров, как я использую запросы к БД:
+
+```sql
+CREATE OR REPLACE FUNCTION  make_report_driver_travel_count_dayly(_from timestamp, _to timestamp, _manager_id int)
+  RETURNS TABLE (driver_id int, name character varying, travels bigint, _date date)
+  LANGUAGE plpgsql AS
+$func$
+BEGIN
+   RETURN QUERY EXECUTE
+   format ('select al.driver_id, d.firstname, count(*) as travels, date_trunc(''day'', working_start)::date as _date
+            from working_lists wl
+            join assign_list al on al.id = wl.assign_id
+            join drivers d on d.id = al.driver_id
+            join driver_enterprise ed on ed.driver_id = al.driver_id
+            join enterprise_manager em on em.enterprise_id = ed.enterprise_id
+            where working_start >= %s and working_start <= %s
+            and manager_id = %s
+            group by al.driver_id, d.firstname, _date
+            order by _date, al.driver_id', 
+          quote_literal(_from), quote_literal(_to), _manager_id);
+END
+$func$;
+
+CREATE OR REPLACE FUNCTION  make_report_vehicle_mileage_dayly(_from timestamp, _to timestamp, _manager_id int)
+  RETURNS TABLE (vehicle_id int, short_number character varying, mileage bigint, _date date)
+  LANGUAGE plpgsql AS
+$func$
+BEGIN
+   RETURN QUERY EXECUTE
+   format ('select al.vehicle_id, v.short_number, sum(distance) as mileage, date_trunc(''day'', working_start)::date as _date
+            from working_lists wl
+            join assign_list al on al.id = wl.assign_id
+            join vehicles v on v.id = al.vehicle_id
+            join enterprise_vehicle ev on ev.vehicle_id = al.vehicle_id
+            join enterprise_manager em on em.enterprise_id = ev.enterprise_id
+            where working_start >= %s and working_start <= %s
+            and manager_id = %s
+            group by al.vehicle_id, _date, v.short_number
+            order by _date, al.vehicle_id', 
+          quote_literal(_from), quote_literal(_to), _manager_id);
+END
+$func$;
+
+
+CREATE OR REPLACE FUNCTION  make_report_vehicle_mileage_dayly(_from timestamp, _to timestamp, _manager_id int, _vehicle_id int)
+  RETURNS TABLE (vehicle_id int, short_number character varying, mileage bigint, _date date)
+  LANGUAGE plpgsql AS
+$func$
+BEGIN
+   RETURN QUERY EXECUTE
+   format ('select al.vehicle_id, v.short_number, sum(distance) as mileage, date_trunc(''day'', working_start)::date as _date
+            from working_lists wl
+            join assign_list al on al.id = wl.assign_id
+            join vehicles v on v.id = al.vehicle_id
+            join enterprise_vehicle ev on ev.vehicle_id = al.vehicle_id
+            join enterprise_manager em on em.enterprise_id = ev.enterprise_id
+            where working_start >= %s and working_start <= %s
+            and manager_id = %s and al.vehicle_id = %s
+            group by al.vehicle_id, _date, v.short_number
+            order by _date, al.vehicle_id', 
+          quote_literal(_from), quote_literal(_to), _manager_id, _vehicle_id);
+END
+$func$;
+```
