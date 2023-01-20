@@ -191,11 +191,15 @@ class ListView : public wxPanel
 }
 ```
 Тут легко привести программу к краху, если дать не тот массив результатов в неподходящий тип таблицы, или добавить в уже существующую таблицу дополнительные неподходящие данные
-
+```cpp
+ReportMainPanel* report = new ReportMainPanel();
+report->
+```
 Стало:
 Сделаем класс ListView иммутабельным и наследуем от него два нужных типа нам класса для отражения соответствующего типа таблиц:
 
 ```cpp
+//Immutable class!!
 class ListView : public wxPanel
 {
    public:
@@ -204,12 +208,14 @@ class ListView : public wxPanel
     virtual void fillTableByQueryResult(std::vector<Json*>& query_result) = 0;
 }
 
+//Immutable class!!
 class  DefaultListView : public ListView
 {
    public:
       void fillTableByQueryResult(std::vector<Json*>& query_result);
 }
 
+//Immutable class!!
 class AggrListView : public ListView
 {
    public:
@@ -252,8 +258,108 @@ private:
 
 ## Пример 3
 
-Разделяем
+Пример третий относительно своего кода не нашел, т.к. привык писать предусловия к методам-командам, изменяющие состояние АТД,и вне зависимости от комбинации вызовов, объект не будет находиться в неправильном состоянии.
+
+На работе был частый шаблон, при котором можно было ловить ран-тайм исключения:
 
 Было:
 
-Стало:
+```php
+class CsvParser
+{
+   //Массив данных из файла
+   private $data;
+   public function __construct__($filepath)
+   {
+     try {
+    	   //Пытаемся открыть и валидировать файл.Если ошибка то закидываем в Бд сообщение об этом
+	} catch (Exception $e) {
+    	   //Пишем сообщение в БД
+	}
+   }
+   
+   // Берем нужные данные из файла...
+   public function retrieve($index)
+   {
+       ...
+   }
+}
+```
+Получается,что у нас остается объект, с которым можно работать, который может привести к объекту с некорректным состоянием (в данном случае,с пустым массивом данных).
+
+
+Как бы изменил:
+
+```php
+abstract class File
+{
+   protected $data;
+   
+   abstract public function writeToDB();
+};
+
+class FileData
+{
+   
+   public functino __construct__(array $data)
+   {
+      $this->data = $data;
+   }
+   
+   //Команды дляьработы с данными
+   
+   public function retrieve($index)
+   {
+   
+   }
+   //определяем метод для записи в БД
+   public function writeToDB()
+   {
+    
+   }
+   ...
+};
+
+class EmptyFile
+{
+   public functino __construct__(array $data)
+   {
+      $this->data = $data;
+   }
+   
+    //определяем метод для записи в БД
+   public function writeToDB()
+   {
+      // Пишем что файл пуст
+   }
+   ...
+};
+
+class CsvParser
+{
+   //Массив данных из файла
+   private array $data;
+   private string $filepath;
+   public function __construct__($filepath)
+   {
+      $this->filepath = $filepath;
+   }
+   
+   public function tryRead()
+   {
+     try {
+    	   //Пытаемся открыть и валидировать файл.Если ошибка то закидываем в Бд сообщение об этом
+	  //Если успещно то записываем все данные в $data
+          
+	  return new FileData($data);
+	} catch (Exception $e) {
+    	   
+	  return new EmptyFile($data);
+	}
+   }
+}
+```
+
+Таким образом мы возвращаем нужное нам "состояние" файла, с котороым можно работать, и вызывать его методы так, чтобы они не привели работы системы в некорректное состояние.
+
+Надо попробовать еще реализовать это через FSM.
