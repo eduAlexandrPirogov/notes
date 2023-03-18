@@ -330,4 +330,117 @@ iter_msgs([From|Users], [To|Rest])->
     iter_msgs([From|Users], Rest).
 ```
 
-Пример 5
+Можно было использовать стандартные приемы при обработке функций, но в качестве практики сделал так.
+
+Пример 5.
+Также можно обобщить коллекции, используя дженерики
+Было
+```cpp
+class MongoCollectionsContainer
+{
+private:
+	friend class boost::serialization::access;
+	template<class Archive>
+	void serialize(Archive& ar, const unsigned int version)
+	{
+		ar& container;
+	}
+	int add_status;
+	int erase_status;
+
+	std::vector<MongoCollection> container{};
+
+public:
+	const int ADD_COLLECTION_STATUS_NIL = -1;
+	const int ADD_COLLECTION_STATUS_OK = 0;
+	const int ADD_COLLECTION_STATUS_ERR = 1;
+
+	const int ERASE_COLLECTION_STATUS_NIL = -1;
+	const int ERASE_COLLECTION_STATUS_OK = 0;
+	const int ERASE_COLLECTION_STATUS_ERR = 1;
+
+	MongoCollectionsContainer();
+
+	void add(const MongoCollection& collection);
+	void erase(MongoCollection* collection);
+
+	int get_add_status();
+	int get_erase_status();
+
+	std::vector<std::string> get_collections_title();
+
+	std::vector<MongoCollection>& get_collections();
+
+	MongoCollection& firstCollection();
+
+	MongoCollection& get_collection(MongoCollection& mongoCollection);
+	MongoCollection& get_collection(std::string& title);
+	MongoCollection& get_collection(const wxString& title);
+
+	~MongoCollectionsContainer();
+
+};
+
+```
+
+Стало:
+
+```cpp
+template<typename T>
+class MongoCollectionsContainer
+{
+private:
+	friend class boost::serialization::access;
+	template<class Archive>
+	void serialize(Archive& ar, const unsigned int version)
+	{
+		ar& container;
+	}
+	int add_status;
+	int erase_status;
+
+	std::vector<T> container{};
+
+public:
+	const int ADD_COLLECTION_STATUS_NIL = -1;
+	const int ADD_COLLECTION_STATUS_OK = 0;
+	const int ADD_COLLECTION_STATUS_ERR = 1;
+
+	const int ERASE_COLLECTION_STATUS_NIL = -1;
+	const int ERASE_COLLECTION_STATUS_OK = 0;
+	const int ERASE_COLLECTION_STATUS_ERR = 1;
+
+	MongoCollectionsContainer();
+
+	void add(const T& item);
+	void erase(T* item);
+
+	int get_add_status();
+	int get_erase_status();
+
+	Остальное, лучше расширить в наследнике
+	//std::vector<std::string> get_item_title();
+
+	//std::vector<T>& get_item();
+
+	//T& firstCollection();
+
+	//T& get_collection(MongoCollection& mongoCollection);
+	//T& get_collection(std::string& title);
+	//T& get_collection(const wxString& title);
+
+	~MongoCollectionsContainer();
+
+};
+```
+
+С контейнерами довольно просто -- они не знает, что хранят, а наш хранимые предметы в целом также не интересуются, где лежат.
+Мы можем рассуждать уже о взаимодействии структур данных за счет более полиморфного кода.
+
+
+----------
+
+Таким образом, полиморфный код, хоть и подразумевает бОльшее количество смыслов, его реализация ограничена -- мы должна следовать некоторому тону, используя
+полиморфный код. В целом, это похоже на унификацию некоторую.
+По поводу конкретного кода мне еще сложно сказать, как мы можем исполнять бОльшее количество операций над ним, но возможно, как уже было написано ранее, это связано
+С тем, что мы должны держать в голове детали, относительно конкретного куска кода.
