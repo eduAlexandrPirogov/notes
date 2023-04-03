@@ -2,8 +2,333 @@
 
 Пример 1.
 
+Суть опишу в конце, интересно, совпала ли она с абстракцией, выраженной в коде:
+Handler.go file
+```go
+type MetricsStorer interface {
+	// Reads all metrics and returns their string representation
+	Read() []byte
+  
+	// Writes metric in store
+	//
+	// Pre-cond: given correct type name and value of metric
+	//
+	// Post-cond: stores metric in storage. If success error equals nil
+	Write(mtype string, mname string, val string) ([]byte, error)
+}
 
-Пример 5. Он получился насыщенным на рассуждения.
+type MetricsHandler interface {
+	RetrieveMetrics(w http.ResponseWriter, r *http.Request)
+	UpdateHandler(w http.ResponseWriter, r *http.Request)
+}
+
+type DefaultHandler struct {
+	DB MetricsStorer
+}
+
+// RetrieveMetric return all contained metrics
+func (d *DefaultHandler) RetrieveMetrics(w http.ResponseWriter, r *http.Request) {
+	body := d.DB.Read()
+	w.Write(body)
+}
+
+// UpdateHandler saves incoming metrics
+//
+// Pre-cond: given correct type, name and val of metrics
+//
+// Post-cond: correct metrics saved on server
+func (d *DefaultHandler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
+	   res, err := d.DB.Write(...)
+	   w.Write(res)
+	}
+}
+```
+database.go file:
+```go
+type Storable interface {
+  // Write writes metric to DB.
+  //
+  // Pre-cond: given correct params for corresponding metric.
+  //
+  // Post-cond: if params are corrects -- writes metric to DB.
+  // Returns marshaled metric and nil error
+  // Otherwise return empty slice of byte and error
+  Write(mtype, mname, val string) ([]byte, error)
+  
+  // Read all metrics that stored in DB
+  //
+  // Post-cond: returns slice of marshaled metrics
+     Read() []byte
+	
+}
+
+type DB struct {
+	Storage   Storable
+	Journaler journal.Journal
+}
+```
+
+Два интерфейса, Storable и MetricsStorer представляют собой абстракцию записи полученных метрик по API в DB. 
+Нам нужно как-то записать метрики в базу и понять успешно ли мы записали.
+Цепочка вызовов операции записи: MetricsStorer.Write(mtype string, mname string, val string) ([]byte, error) --> Storable.Write(mtype, mname, val string) ([]byte, error). Можно понять, что полученные параметры преобразуются в слайт байтов, которые затем записываются. В данном случае возвращаются две переменные --
+слайт байтов и результат успешной операции записи.
+Если рассуждать о методе данном, то можно прийти к нескольким рассуждениям, я приведу лишь пару:
+1) Данные string преобразуются в слайс байтов и записываются в базу, возвращается этот слайт и nil error, самый простой случай.
+2) Если слайс байтов, записываемые Storable уже имеются в базе, то возвращаем этот слайт байтов и ошибку not found
+3) Если параметры не верны, то даже не пытаемся преобразовать их в слайс, а сразу возвращаем пустой слайт с соответствующей ошибкой.
+
+В зависимости от реальных данных, конкретных спецификаций по данным, мы можем применить одну из вышеприведенных вариантов. 
+При этом, мы точны в рассуждениях -- успех операции записи возвращается переменной error, а записываемые данные -- слайсом байтов.
+операция
+
+Рассмотрми теперь операцию записи. 
+Цепочка вызовов операции записи: MetricsStorer.Read() []byte --> Storable.Read() []byte. Вот в данном случае, абстракция чтения не так точна.
+Если, база имеет ошибку, которая в последствии обрабатывается и возвращается пустой слайт, как нам понять, была ли это ошибка или просто нет данных?
+Тут, как и вслучае с абстркцией записи данных, лучше добавить в возвращаемый результат error, который будет указывать на успех операции.
+MetricsStorer.Read() ([]byte, error) --> Storable.Read() ([]byte, error). Абстракция становится однозначной и довольно точной.
+
+Данная абстракция чтения и записи показывает, что данный участок кода обладает таким свойством, что операция либо совершается успешно (error = nil) 
+и возвращается результат записи ([]byte), получился шаблон.
+
+По итогу, у нас получается вот такая простая абстракция чтения и записи данных.
+
+====================================================================================================================================================
+
+Пример 2.
+
+Следующий пример. Опять же сначала код, попробуйте понять по цепочке вызовов суть абстркции, а дальше я приведу истинное значение.
+Суть заключается в том, что имеются метрики, которые собирают значение CPU, StackSys, и эти метрики отправляются куда-то.
+```go
+// Metricalbes entities should update own metrics by Read() errpr method
+// Read make metrics update own value. Returns nil if success otherwise error
+type Metricable interface {
+	// Read makes metrics update own values
+	//
+	// Pre-cond:
+	//
+	// Post-cond: if read finished successfully and error return nil then metrics was updated
+	Read() error
+	
+	// AsMap returns own metrics as map where key is name of metric
+	//
+	// Pre-cond:
+	//
+	// Post-cond: returns new map (immutable) of own metrics
+	AsMap() map[string]interface{}
+}
+
+// Trackarable collects metrics
+// InvokeTrackers make stored metrics update own values
+type Trackerable interface {
+	// InvokeTracker makes trackers update own values
+	//
+	// Pre-cond:
+	//
+	// Post-cond: if error == nil then metrics updated own values
+	// Otherwise metrics wasn't updated
+	InvokeTrackers() error
+}
+```
+
+Итак, имеется Metricable, которая что-то считывает Read(), который может завершиться неудачно (error). Также имеется метод, который выдает нам мапу,
+ключ у которой строка а значение -- что угодно. Поскольку AsMap() не принимает аргументов, то экземпляр, реализующий данный интерфейс, должен преобразовать
+собственные значения в мапу.
+Также имеется Trackerable, который заставляет метрики обновить собственные значения. Поскольку InvokeTrackers() не имеет параметров,
+то экземпляр, реализующий данный интерфейс, должен invoke собственный тип метрики Metricable. 
+Получается следующая цепочка вызовов: Trackerable.InvokeTrackers() error --> Metricable.AsMap() map[string]interface{} --> Metricable.Read() error. 
+
+Насколько точна абстракция относительно обновления метрик? Операция Read() возвращает лишь статус успеха операции. 
+Metricable просто перезаписывает свои старые значение при выполнении Read(), и, если не произошло фатальных ошибок, то error всегда будет nil.
+Относительно Trackerable.InvokeTracker() ситуация аналогичная.
+
+Получился шаблон по чтению, сбору и обновлению метрик.
+На самом деле комментарии даже лучше подправить, написать, что работа идет со всем, что можно измерить, а не конкретно с метриками.
+
+====================================================================================================================================================
+
+Пример 3.
+
+Шаблон по работе с ТГ-ботом и взаимодействие с БД. Вот тут уже приведу неточную абстракцию и приведу примеры, как ее улучшить.
+
+```go
+type DB interface {
+ RegisterUser(chatId int64, username string) error
+ ReadTasks(username string) ([]db.Task, error)
+ ReadUsers() ([]db.User, error)
+ AddTask(username string, task string) error
+ RmTask(username string, task uint64) error
+ UserStats(username string) (db.Stats, error)
+}
+
+type TgCommandHandler interface {
+ ProcessCommand(isWaitingInput *bool, update *tgbotapi.Update, bot *tgbotapi.BotAPI)
+ ProcessAddTask(msg tgbotapi.MessageConfig, update *tgbotapi.Update) tgbotapi.MessageConfig
+ ProcessRegister(msg tgbotapi.MessageConfig, update *tgbotapi.Update) tgbotapi.MessageConfig
+ ProcessTaskList(msg tgbotapi.MessageConfig, update *tgbotapi.Update) tgbotapi.MessageConfig
+}
+
+type TgBot struct {
+ Token string
+ //Change to interface
+ Bot *tgbotapi.BotAPI
+ //Change to interface
+ Scheduler scheduler.Scheduler
+ Storage   DB
+}
+
+//Некоторые участки кода, к которым придется перенаправляться. Такие участки раскиданы по файлам
+func (t *TgBot) processCommand(isWaitingInput *bool, update *tgbotapi.Update, bot *tgbotapi.BotAPI) {
+ // Create a new MessageConfig. We don't have text yet,
+ // so we leave it empty.
+
+ msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+ // Extract the command from the Message.
+ switch update.Message.Command() {
+ case "addtask":
+  *isWaitingInput = true
+  msg = t.processAddTask(msg, update)
+ case "tasklist":
+  msg = t.processTaskList(msg, update)
+ case "begin":
+  msg = t.processRegister(msg, update)
+ case "stats":
+  msg = t.processStats(msg, update)
+ default:
+  msg.Text = "Unknown command"
+ }
+ SendMessage(msg, bot)
+}
+
+func (t *TgBot) processCommand(isWaitingInput *bool, update *tgbotapi.Update, bot *tgbotapi.BotAPI) {
+ // Create a new MessageConfig. We don't have text yet,
+ // so we leave it empty.
+
+ msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+ // Extract the command from the Message.
+ switch update.Message.Command() {
+ case "addtask":
+  *isWaitingInput = true
+  msg = t.processAddTask(msg, update)
+ case "tasklist":
+  msg = t.processTaskList(msg, update)
+ case "begin":
+  msg = t.processRegister(msg, update)
+ case "stats":
+  msg = t.processStats(msg, update)
+ default:
+  msg.Text = "Unknown command"
+ }
+ SendMessage(msg, bot)
+}
+```
+
+Суть заключается в том, что в зависимости от команды, будет вызвана соответствующая функция БД. Шаблон  "команда бота --> команда БД" получился
+неточным, а абстракция -- не лучшей. Во-первых, тут нет комментариев. Во-вторых, приходится постоянно перенаправляться, чтобы убедиться в своих домыслах.
+В третьих, заголовок функций интерфейсов мало о чем говорит.
+
+Теперь по порядку. Чтобы сделать абстракцию "обработка команды ТГ --> соответствующая обработка БД", нужно переработать часть "обработка команды ТГ".
+Действительно, интерфейс DB, который отвечает за взаимодействие с БД, получился довольно точным, осталось лишь добавить комментарии:
+```go
+type DB interface {
+ // RegisterUser registers user in system.
+ // 
+ // Pre-cond: given chatID and unique Username of user
+ //
+ // Post-cond: If user wasn't registere, then DB register him and error = nil
+ // Otherwise returns corresponding erro
+ RegisterUser(chatId int64, username string) error
+
+ // RmTask remove task for given username
+ //
+ // Pre-cond: given registered username and existing task id
+ //
+ // Post-cond: if user is registered and task is exists with given id 
+ // Task is removed and error = nil
+ // Otherwise return error
+ RmTask(username string, task uint64) error
+ 
+ // UserStats collects stats and writes it to the struct db.Stats
+ //
+ // Pre-cond: given registered username
+ //
+ // Post-cond: if username is registered, returns Stats with filled values and error = nil
+ // Otherwise returns empty struct and error
+ UserStats(username string) (db.Stats, error)
+}
+```
+
+Судя по сообщениям мы понимаем шаблон взаимодействия с БД. В случае обновления мы возвращаем статус успеха. В случае чтения, мы 
+возвращаем результат и также статус усупеха.
+
+Переработаем часть шаблона "обработка команд ТГ". 
+Во-первых, возвращаемое значение MessageConfig (просто сообщение, аналогично, если бы мы возвращали string), не говорит нам ни о чем.
+Во-вторых, если убрать параметры, нужные лишь для API Telegram'а, то об интерфейсе мало что известно, лишь назначение операций.
+Проблема в там, что в ProcessAddTask мы можем добавить логику ProcessRegister и никак не поймем это!
+
+Что тут можно сделать?
+1) Изменить результат возвращаемого значения
+2) Изменить параметры методов
+3) Добавить комментарии
+
+Важная ремарка. Кажется, что я спускаюсь в реализации, но нет. Я рассматриваю вариации шаблонов, какие абстракции можно использовать, код выступает
+в роли эскиза/псевдокода.
+```go
+type TgCommandHandler interface {
+  ProcessCommand(isWaitingInput *bool, update *tgbotapi.Update, bot *tgbotapi.BotAPI)
+  ProcessAddTask(msg tgbotapi.MessageConfig, update *tgbotapi.Update) tgbotapi.MessageConfig
+  ProcessRegister(msg tgbotapi.MessageConfig, update *tgbotapi.Update) tgbotapi.MessageConfig
+  ProcessTaskList(msg tgbotapi.MessageConfig, update *tgbotapi.Update) tgbotapi.MessageConfig
+}
+```
+
+Получилось:
+```go
+type TgCommandHandler interface {
+  //ProcessCommand handles commands that came from user.
+  // Return bool if commands user inputed a command and reply with some message
+  //
+  // Pre-cond: given update of tgbotApi
+  //
+  // Post-cond: bool = true if we waiting for user respone otherwise bool = false
+  // error = nil if nothing happned. Otherwise if error !=nil then bool = false
+  ProcessCommand(update *tgbotapi.Update) (bool, error)
+  
+  // ProcessAddTask handle command of adding task
+  //
+  // Pre-cond:
+  //
+  // Post-cond: handle user response and return instance of msgs.AddTaskMessage.
+  // msgs.AddTaskMessage contains corresponding message.
+  ProcessAddTask(update *tgbotapi.Update) msgs.AddTaskMessage
+  
+   // ProcessTaskList handle command of adding task
+  //
+  // Pre-cond:
+  //
+  // Post-cond: handle user response and return instance of msgs.TaskListMessage.
+  // msgs.TaskListMessage contains corresponding message and reply keyboard with tasks
+  ProcessTaskList(update *tgbotapi.Update) msgs.TaskListMessage
+}
+```
+
+Теперь у нас получается следущая картина абстркции "обработка команд ТГ -> обработка БД". Тут хоть и не обойтись без перенаправления, но 
+это будет сделано в рамках одного файла. Обработка команд ТГ теперь возвращает некоторый шаблон ответов, посмотрев который (опять перенаправление),
+мы можем понять суть ситуации. Главное, что мы избавились от неоднозначности: в первой версии мы возвращали на всех Message.
+Сейчас же мы видим иную ситуацию. Соответствующие варианты на обертки сообщений раскрывают картину лучше и четче.
+Присутствует однозначное отражение, что дает прибавляет точность.
+
+
+====================================================================================================================================================
+
+Пример 4.
+
+====================================================================================================================================================
+
+Пример 5.
+
+====================================================================================================================================================
+
+Пример 6. Он получился насыщенным на рассуждения.
 Рассмотрим следующие фрагменты кода, которые реализуют такую логику: на API поступают метрики, которые нужно сохранить в БД, а также прочитать их.
 Метрики состоят из имени. типа и значения.
 
