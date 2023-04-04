@@ -1,5 +1,7 @@
 Что такое абстракция
 
+Один из самых сложных материалов, который мне давался, посему я отражал дополнительно свои мысли под примерами.
+
 Пример 1.
 
 Суть опишу в конце, интересно, совпала ли она с абстракцией, выраженной в коде:
@@ -322,11 +324,142 @@ type TgCommandHandler interface {
 
 Пример 4.
 
+```go
+type Storable interface {
+    // Replicate sends to ReplWriter messgae to replicate data
+    //
+    // Pre-cond: given a pointer to ReplWriter
+    //
+    // Post-cond: signal to replicate data was sent to replWriter
+    // If succes than returns number of replicated bytes and error = nil
+    // Otherwise returns -1 and error
+    Replicate(r *ReplWriter) (int, error)
+}
+
+//ReplWriter receive data and writes it to dest.
+type ReplWriter interface {
+    // Receive reads incoming data to replicate
+    //
+    // Pre-cond: given data to replicate
+    //
+    // Post-cond: RelWriter runs thread that accepts incoming data
+    // If succes than returns number of read bytes and error = nil
+    // Otherwise returns -1 and error
+    Receive(data []byte) (int, error)
+    
+    // Write writer all incomed data. Dest can be file, other db, etc...
+    //
+    // Pre-cond: Given Destinationer that can write data to destionation
+    //
+    // Post-cond: data was written to dest. 
+    // If succes than returns number of written bytes and error = nil
+    // Otherwise returns -1 and error
+    Write(d Destinationer) (int, error)
+}
+
+type Destinationer interface {
+    // Write writes given data
+    //
+    // Pre-cond: given data to write
+    //
+    // Post-cond: writes data to destination. 
+    // If succes than returns number of written bytes and error = nil
+    // Otherwise returns -1 and error.
+    Write(data []byte) (int, error)
+}
+```
+
+Данный кусок кода демонстрирует абстракцию репликации данных. 
+Шаблон: "Уведомить репликатор --> Принять данные --> Записать данные в пункт назначения--> Уведомить об успехе операции".
+
+Насколько точно отражают абстракцию репликации данных данный кусок кода? Успех операции отражает error (получается уже сам по себе как шаблон). Возможно и не следует
+возвращать int, количество записанных байтов.
+Если смотреть на цепочку вызовов, то получится следующее:
+"Storable.Replicate(r *ReplWriter) (int, error) --> ReplWriter.Receive(data []byte) (int, error) --> ReplWriter.Write(d Destinationer) (int, error) --> Destination.Write(data []byte) (int, error)"
+Вопрос касательно двух методов ReplWriter'a: Receive и Writer -- насколько точно они отражают абстракцию? Если с Write все довольно однозначно и точно, то
+Receive немного запутывает -- зачем возвращать int. В общем, лучше убрать Receive и сделать цепочку вызовов вот такой:
+
+"Storable.Replicate(r *ReplWriter) (int, error) --> ReplWriter.Write(d Destinationer) (int, error) --> Destination.Write(data []byte) (int, error)"
+Проблема первой цепочки в том, что Receiver и Write не коммутативны + Receive не добавляет точности.
+
 ====================================================================================================================================================
 
 Пример 5.
 
+Рассмотрми абстракцию volum'ов из Docker'а:
+
+```go// Driver is for creating and removing volumes.
+type Driver interface {
+	// Name returns the name of the volume driver.
+	Name() string
+	// Create makes a new volume with the given name.
+	Create(name string, opts map[string]string) (Volume, error)
+	// Remove deletes the volume.
+	Remove(vol Volume) (err error)
+	// List lists all the volumes the driver has
+	List() ([]Volume, error)
+	// Get retrieves the volume with the requested name
+	Get(name string) (Volume, error)
+	// Scope returns the scope of the driver (e.g. `global` or `local`).
+	// Scope determines how the driver is handled at a cluster level
+	Scope() string
+}
+
+// Volume is a place to store data. It is backed by a specific driver, and can be mounted.
+type Volume interface {
+	// Name returns the name of the volume
+	Name() string
+	// DriverName returns the name of the driver which owns this volume.
+	DriverName() string
+	// Path returns the absolute path to the volume.
+	Path() string
+	// Mount mounts the volume and returns the absolute path to
+	// where it can be consumed.
+	Mount(id string) (string, error)
+	// Unmount unmounts the volume when it is no longer in use.
+	Unmount(id string) error
+	// CreatedAt returns Volume Creation time
+	CreatedAt() (time.Time, error)
+	// Status returns low-level status information about a volume
+	Status() map[string]interface{}
+}
+```
+
+Исходя из кода можно сделать вывод, что это отражение взаимодействия с Volume'ми докера. 
+Причем это можно говорить даже не зная, что такое докер: например 
+// List lists all the volumes the driver has
+List() ([]Volume, error) говорит нам о том, где хранятся вольюмы.
+Также отображение говорит, что взаимодействие происходит с контейнерами не посредством именно Driver'-a, это лишь контейнер, а именно с самим
+экземпляром Volum'а
+
+
 ====================================================================================================================================================
+
+3. По поводу определения Дейкстры  "быть на новом семантическом уровне, где можно быть парадоксально точны". Для себя выделил такой момент, что
+абстракция заключается не в каких-то конкретных фичах языка, будь-то интерфейс или абстрактный класс (это просто инструменты, попытки направить абстакцию
+в нужное русло, область),а в том, что это некоторый мета-язык, отражающий положение мира в коде. Хороший пример был с преобразованием чисел и работу транзисторов.
+Вообще, абстракцию составляет не сами фичи языка, а их применение, насколько точно комбинация функций, классов, интерфейсов, пакетов, комментариев 
+отразит логику в код. Причем, получается, что тем меньше "размер" подобных абстракций, тем более точно отражают они картину.
+
+В общем, для себя я буду применять следующие техники:
+1) Спрашивать себя, как абстракция Х отражается в Y, а затем в код
+2) Насколько точна абстракция (определение коммутативности абстракций мне дается сложнее)
+3) Корректировать себя, что я работаю с абстракцией, а не с кодом, посредством выявление в участке кода множество абстракций (суть в том, что абстракций может быть бесконечно много) 
+
+====================================================================================================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 Пример 6. Он получился насыщенным на рассуждения.
 Рассмотрим следующие фрагменты кода, которые реализуют такую логику: на API поступают метрики, которые нужно сохранить в БД, а также прочитать их.
@@ -494,3 +627,5 @@ type Storable interface {
 }
 
 ```
+
+Надо подумать....
