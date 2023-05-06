@@ -1,8 +1,11 @@
-#
+# Что делает тесты хорошими
 
-#1
+#Пример 1
 
-Was
+Тест изначально проверял, что записываемые данные в БД реплицировались, и тест был завязан на конкретной реализации БД и Journaler'a.
+Из-за этого, тест походил больше на интеграционный поскольку нужно было сделать множество методов чтобы проверить корректность функции.
+
+Было:
 ```go
 func TestWriteWithReplicate(t *testing.T) {
 	sut := MemStorageDB() // Concrete DB with concrete journaler
@@ -19,13 +22,23 @@ func TestWriteWithReplicate(t *testing.T) {
 	tl.Add(metric.ToTuple())
 
 	sut.Storage.Write(tl)
+	sut.Storage.Clear() // Mock method to imitate new DB instance
 
-	actual := len(sut.Journaler.RestoredRecords())
-	assert.Greater(t, actual, 0)
+	sut.Journaler.Restore()
+	actual, _ := sut.Storage.Read(t1)
+
+	assert.Equals(t, metric, actual)
 }
 ```
 
-Now
+Мы хотим выявить, что при записи в БД, запись реплицируется. Это можно проверить следующим свойством:
+Если записывается значение в БД
+И
+Значение также реплицируется
+То
+Количество записанных значений будет равно количество реплицируемых.
+
+Стало:
 ```go
 // Own mock object
 type MockJournal struct {
@@ -73,13 +86,22 @@ func TestWriteWithReplicate(t *testing.T) {
 
 	sut.Storage.Write(tl)
 
-	actual := len(sut.Journaler.RestoredRecords())
+	actual := len(sut.Journaler.RestoredRecords()) // Checking abstract Affect
 	assert.Greater(t, actual, 0)
 }
 ```
 
-#2
+Обратите внимание на две последние строки теста. Я не проверяю, как записывались значения и чему они равны, поскольку в зависимости от реализации,
+реплицируемое значение может сериализоваться вообще на стороннем сервисе, доступ на чтение к которому мы не имеем, и проверить значения не может.
+Но мы проверяем свойство абстрактного эффекта, что, записав значение в Базу (пустую!), то значение также реплицировалось.
 
+#Пример 2
+
+Рассмотрим следующий юнит-тест (опять же, он должен быть, как мне кажется, интеграционным, но имеем, что имеем), который тестирует, что 
+при записи метрики Counter, мы удостоверяемся, что запись в API работает корректно. 
+Опять же, строчка `server := createTestServer() //server with concrete DB realisation` реализует конкретный сервер с конкретной БД и Репликатором.
+
+Было:
 ```go
 func TestCorrectCounterMetric(t *testing.T) {
 	deltas := []int64{1, 2, 3, 4, 5, 6, 7, 8}
@@ -128,8 +150,15 @@ func TestCorrectCounterMetric(t *testing.T) {
 }
 ```
 
+Исправил следующим образом, разделив тест на два теста. Почему я сделал именно так, описываю в самом низу в выводе.
+А пока обозначу такую логику -- если поступила корректная метрика, то сервер вернет положительный ответ (201 status code). БД -- это побочный эффект.
+
+Я разделил тест на следущих два, который отправляет корректный объект, чтобы:
+1) Удостовериться, что получу ожидаемый код
+2) удостовериться, что будет воспроизведен абстрактный эффект записи в БД.
 ```go
 
+//удостовериться, что будет воспроизведен абстрактный эффект записи в БД.
 func TestCorrectWriteCounterMetric(t *testing.T) {
 	deltas := []int64{1, 2, 3, 4, 5, 6, 7, 8}
 	var expectedCounter int64 = 0
@@ -169,6 +198,7 @@ func TestCorrectWriteCounterMetric(t *testing.T) {
 	}
 }
 
+//Удостовериться, что получу ожидаемый код
 func TestCorrectCounterMetric(t *testing.T) {
 	deltas := []int64{1, 2, 3, 4, 5, 6, 7, 8}
 	var expectedCounter int64 = 0
@@ -204,10 +234,14 @@ func TestCorrectCounterMetric(t *testing.T) {
 }
 ```
 
-#3
+#Пример 3
 
+В продолжение примера 2. В примере два побочный эффект проверялся на пустой БД.
+Но каков будет побочный эффект, если мы запишем множество объектов. Должна ли БД перезаписать это, или создать новые объекты?
+Это зависит от требований, но суть в том, что изначально, я в тесте проверял КАКОЕ значение записывает/перезаписывает БД, вместо того, чтобы проверить эффект:
+
+Было:
 ```go
-
 func TestCorrectCounterUpdateHandler(t *testing.T) {
 	deltas := []int64{0, 1, 2, 3, 4, 5}
 	data := []Payload{}
@@ -245,6 +279,7 @@ func TestCorrectCounterUpdateHandler(t *testing.T) {
 			err = json.Unmarshal(buffer, &respJs)
 			assert.Nil(t, err)
 
+			// Проверяем КАК бд записала значение
 			assert.EqualValues(t, actual.StatusCode, resp.StatusCode)
 			assert.Greater(t, resp.ContentLength, int64(0))
 			require.EqualValues(t, updatedMetric, *respJs.Delta)
@@ -255,9 +290,11 @@ func TestCorrectCounterUpdateHandler(t *testing.T) {
 
 ```
 
+В моем случае, нужно было перезаписывать текущее значение. Значит и стоит проверять соответствующий побочный эффект, например:
 
+Стало:
 ```go
-
+//При записи нескольких однотипных объектов, старый объект перезаписывается (рамзер БД не увеличивается)
 func TestCorrectCounterUpdateHandler(t *testing.T) {
 	deltas := []int64{0, 1, 2, 3, 4, 5}
 	data := []Payload{}
@@ -284,23 +321,20 @@ func TestCorrectCounterUpdateHandler(t *testing.T) {
 			}
 
 			resp, err := executeUpdateRequest(server, js)
-			require.Nil(t, err)
 			defer resp.Body.Close()
 
-			var respJs metrics.Metrics
 			buffer, err := io.ReadAll(resp.Body)
-			if err != nil {
-				t.Errorf("got error while reading body %v", err)
-			}
-			err = json.Unmarshal(buffer, &respJs)
-			assert.Nil(t, err)
+			
 
-			assert.EqualValues(t, actual.StatusCode, resp.StatusCode)
+			//При записи нескольких однотипных объектов, старый объект перезаписывается (рамзер БД не увеличивается)
 			assert.Equal(t, 1, h.DB.Storage.Len())
 		})
 	}
 }
 ```
 
-#4
+
+# Пример 4
+
+# Пример 5
 
