@@ -205,3 +205,102 @@ func TestCorrectCounterMetric(t *testing.T) {
 ```
 
 #3
+
+```go
+
+func TestCorrectCounterUpdateHandler(t *testing.T) {
+	deltas := []int64{0, 1, 2, 3, 4, 5}
+	data := []Payload{}
+	for i := range deltas {
+		data = append(data, Payload{
+			StatusCode: http.StatusOK,
+			Metric: metrics.Metrics{
+				ID:    "some",
+				MType: "counter",
+				Delta: &deltas[i],
+				Value: nil,
+			},
+		})
+	}
+	server, _ := createTestServer()
+	defer server.Close()
+	var updatedMetric int64 = 0
+	for _, actual := range data {
+		updatedMetric += *actual.Metric.Delta
+		t.Run("Correct counter", func(t *testing.T) {
+			js, err := json.Marshal(actual.Metric)
+			if err != nil {
+				t.Errorf("got error while marshal json %v", err)
+			}
+
+			resp, err := executeUpdateRequest(server, js)
+			require.Nil(t, err)
+			defer resp.Body.Close()
+
+			var respJs metrics.Metrics
+			buffer, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Errorf("got error while reading body %v", err)
+			}
+			err = json.Unmarshal(buffer, &respJs)
+			assert.Nil(t, err)
+
+			assert.EqualValues(t, actual.StatusCode, resp.StatusCode)
+			assert.Greater(t, resp.ContentLength, int64(0))
+			require.EqualValues(t, updatedMetric, *respJs.Delta)
+			assert.Equal(t, true, true)
+		})
+	}
+}
+
+```
+
+
+```go
+
+func TestCorrectCounterUpdateHandler(t *testing.T) {
+	deltas := []int64{0, 1, 2, 3, 4, 5}
+	data := []Payload{}
+	for i := range deltas {
+		data = append(data, Payload{
+			StatusCode: http.StatusOK,
+			Metric: metrics.Metrics{
+				ID:    "some",
+				MType: "counter",
+				Delta: &deltas[i],
+				Value: nil,
+			},
+		})
+	}
+	server, h := createTestServer()
+	defer server.Close()
+	var updatedMetric int64 = 0
+	for _, actual := range data {
+		updatedMetric += *actual.Metric.Delta
+		t.Run("Correct counter", func(t *testing.T) {
+			js, err := json.Marshal(actual.Metric)
+			if err != nil {
+				t.Errorf("got error while marshal json %v", err)
+			}
+
+			resp, err := executeUpdateRequest(server, js)
+			require.Nil(t, err)
+			defer resp.Body.Close()
+
+			var respJs metrics.Metrics
+			buffer, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Errorf("got error while reading body %v", err)
+			}
+			err = json.Unmarshal(buffer, &respJs)
+			assert.Nil(t, err)
+
+			assert.EqualValues(t, actual.StatusCode, resp.StatusCode)
+			assert.Equal(t, 1, h.DB.Storage.Len())
+		})
+	}
+}
+```
+
+#4
+
