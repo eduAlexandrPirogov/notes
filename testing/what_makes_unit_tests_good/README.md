@@ -86,8 +86,9 @@ func TestWriteWithReplicate(t *testing.T) {
 
 	sut.Storage.Write(tl)
 
-	actual := len(sut.Journaler.RestoredRecords()) // Checking abstract Affect
-	assert.Greater(t, actual, 0)
+	//Абстрактный эффект, проверяющий, что количество реплицируемых записей равно количество записанным в БД значению.
+	actual := len(sut.Journaler.RestoredRecords()) 
+	assert.Equals(t, len(actual), sut.DB.Storage.Len())
 }
 ```
 
@@ -143,8 +144,8 @@ func TestCorrectCounterMetric(t *testing.T) {
 			}
 			err = json.Unmarshal(buffer, &respJs)
 			assert.Nil(t, err)
-
-			assert.EqualValues(t, sum, *respJs.Delta)
+			
+			assert.EqualValues(t, sum, *respJs.Delta) // Сравниваю конкрентные значения, реализацию
 		})
 	}
 }
@@ -192,8 +193,9 @@ func TestCorrectWriteCounterMetric(t *testing.T) {
 			defer resp.Body.Close()
 
 			assert.Equal(t, expected.StatusCode, resp.StatusCode)
-
-			assert.Greater(t, h.DB.Storage.Len(), 0) //abstract effect. Storage of DB was increased if it was empty
+				
+			//abstract effect. Storage of DB was increased if it was empty
+			assert.Greater(t, h.DB.Storage.Len(), 0) 
 		})
 	}
 }
@@ -327,6 +329,7 @@ func TestCorrectCounterUpdateHandler(t *testing.T) {
 			
 
 			//При записи нескольких однотипных объектов, старый объект перезаписывается (рамзер БД не увеличивается)
+			// Проверяем инвариант абстрактного эффекта записи в БД
 			assert.Equal(t, 1, h.DB.Storage.Len())
 		})
 	}
@@ -373,7 +376,7 @@ func TestEnsureServicesExistErrors(t *testing.T) {
 		},
 	} {
 		t.Run(strings.Join(testcase.input, ";"), func(t *testing.T) {
-			err := ensureServicesInstalled(testcase.input) //abstract effect-----------------------------------------------------------------------------------------------------------------------------
+			err := ensureServicesInstalled(testcase.input) //abstract effect appears here--------------------------------------------------------------------------------------------------------------------
 			if err == nil {
 				t.Fatalf("expected error for input %v", testcase.input)
 			}
@@ -429,10 +432,8 @@ func TestEnsureServicesExistErrors(t *testing.T) {
 	} {
 		t.Run(strings.Join(testcase.input, ";"), func(t *testing.T) {
 			err := ensureServicesInstalled(testcase.input) //abstract effect-----------------------------------------------------------------------------------------------------------------------------
-			// Проверяем наличие асбатрктного эффекта (возникновение ошибки
-			if err == nil {
-				t.Fatalf("expected error for input %v", testcase.input)
-			}
+			// Явно проверяем наличие асбатрктного эффекта (возникновение ошибки)
+			require.NotNil(t, err, fmt.Fprintf("expected error for input %v", testcase.input))
 			// А вот это бы я совсем убрал, т.к. это должен проверять соответствующий модуль обработки ошибок
 			/*if !strings.Contains(err.Error(), testcase.expectedError) {
 				t.Fatalf("expected error %q to contain %q", err.Error(), testcase.expectedError)
@@ -444,3 +445,63 @@ func TestEnsureServicesExistErrors(t *testing.T) {
 
 # Пример 5
 
+Ещё один пример из docker engine:
+
+```go
+
+func TestLogContainerEventWithAttributes(t *testing.T) {
+	e := events.New()
+	_, l, _ := e.Subscribe()
+	defer e.Evict(l)
+
+	ctr := &container.Container{ 
+		ID:   "container_id",
+		Name: "container_name",
+		Config: &containertypes.Config{
+			Labels: map[string]string{
+				"node": "1",
+				"os":   "alpine",
+			},
+		},
+	}
+	daemon := &Daemon{  //!!!!
+		EventsService: e,  //!!!!
+	}
+	attributes := map[string]string{
+		"node": "2",
+		"foo":  "bar",
+	}
+	daemon.LogContainerEventWithAttributes(ctr, "create", attributes) // Abstract effect
+        
+	// Вот тут уже неявно проверяем воздействие абстракнтого эффекта
+	validateTestAttributes(t, l, map[string]string{
+		"node": "1",
+		"foo":  "bar",
+	})
+}
+```
+
+daemon -- конкретный демон, с конкретным EvenService'ом, который вызывает абстрактный эффект логгирования контейнера. 
+Проблема в том, что в различных ОС демоны могут вести себя по разному (пока не уверен точно). Забавно, что в иных тестах имеются фейки на подобные сущности, а вот тут нет.
+
+В данном случае я также змаенил EventService на MockEventService, и, если уж не изменять этот тест, то выделил бы его на отдельный.
+
+
+
+================================================================================================================================================================================================
+4.
+Теперь в целом о моках и правильности написания тестов. Изучив The art of unit-testing, я подумал, что моки довольно бесполезная штука, мол, зачем нам тестировать мок? 
+Теперь я вижу ситуация в ином ключе.
+
+Unit-тесты теперь я могу разделить на две категории:
+1) тесты, проверяющие работу сущности
+2) тесты, проверяющие взаимодействие сущности с внешним миром
+
+Если с 1-ым пунктом все понятно, то второй требует пояснений, поскольку "как заглушка может проверять взамодействие с миром"? Дело в том, что кусок тестируемого кода, можно представить в виде 
+кусочка пазла. 1-ый пункт тестирует рисунок этого пазла, когда как второй пункт тестирует, что это пазл можно соединить с другим пазлом (модулем, классом и т.д.). В качестве помощника могут быть представлены
+интерфейсы написанные ранее, в Go с duck-typing очень удобно это делать.
+
+Моки -- это больше про то, что ваша тестируемая сущность действительно способна взаимодействовать с внешним миром, а самое главное, что взаимодействует она посредством некоторого контракта. тем самым,
+отвязываясь от реализации и делая тесты менее хрупкими, тесты быстрее, легковеснее и быстрее рефакторятся.
+
+Поэтому, в 2-3 примерах, я разделяю тесты, которые тестируют сущность и тестируют взаимодействие с сущностью.
