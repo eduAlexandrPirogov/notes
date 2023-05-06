@@ -336,5 +336,111 @@ func TestCorrectCounterUpdateHandler(t *testing.T) {
 
 # Пример 4
 
+Рассмотрим ещё пример из Docker Engine. Я подчеркнул моменты, на которые стоит обратить внимание.
+Тест проверяет ошибочность запуска daemon'a на винде, что при работе сервиса возникают побочные эффекты связанные с обработкой ошибок.
+
+Строчка  `m, err := mgr.Connect()` завязана на конкретную реализацию windows. 
+
+
+```go
+func TestEnsureServicesExistErrors(t *testing.T) {
+	m, err := mgr.Connect() //----------------------------------------------------------------------------------------------------------------------------------------------------------------
+	if err != nil {
+		t.Fatal("failed to connect to service manager, this test needs admin")
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(existingService) 
+	if err != nil {
+		t.Fatalf("expected to find known inbox service %q, this test needs a known inbox service to run correctly", existingService)
+	}
+	defer s.Close()
+
+	for _, testcase := range []struct {
+		input         []string
+		expectedError string
+	}{
+		{
+			input:         []string{"daemon_windows_test_fakeservice"},
+			expectedError: "failed to open service daemon_windows_test_fakeservice",
+		},
+		{
+			input:         []string{"daemon_windows_test_fakeservice1", "daemon_windows_test_fakeservice2"},
+			expectedError: "failed to open service daemon_windows_test_fakeservice1",
+		},
+		{
+			input:         []string{existingService, "daemon_windows_test_fakeservice"},
+			expectedError: "failed to open service daemon_windows_test_fakeservice",
+		},
+	} {
+		t.Run(strings.Join(testcase.input, ";"), func(t *testing.T) {
+			err := ensureServicesInstalled(testcase.input) //abstract effect-----------------------------------------------------------------------------------------------------------------------------
+			if err == nil {
+				t.Fatalf("expected error for input %v", testcase.input)
+			}
+			if !strings.Contains(err.Error(), testcase.expectedError) {
+				t.Fatalf("expected error %q to contain %q", err.Error(), testcase.expectedError)
+			}
+		})
+	}
+}
+```
+
+Поскольку работа докера сильно зависит, на какой ОС использует, то тут такой подход мне кажется ненадежным. Во-первых, я не смогу запустить адекватно тесты на Ubuntu, тесты, предназначенные на винде.
+Во-вторых, как будет работать дкоер c Windows 10 и Windows XP? 
+Конечно пример искуственный, но суть в том, что изменив среду, наши тесты могут легко поломаться. Причем тесты вышеупомянутые проверяет конкретные ошибки (конечно, в Go стиле, но речь немного о другом).
+
+Как бы изменил:
+```go
+type MockMgr struct {
+    MockHandle windows.MockWindows
+}
+
+// Далее методы для MockWindows
+
+//Сам тест
+func TestEnsureServicesExistErrors(t *testing.T) {
+	m, err := mgr.Connect() //Mock
+	if err != nil {
+		t.Fatal("failed to connect to service manager, this test needs admin")
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(existingService) 
+	if err != nil {
+		t.Fatalf("expected to find known inbox service %q, this test needs a known inbox service to run correctly", existingService)
+	}
+	defer s.Close()
+
+	for _, testcase := range []struct {
+		input         []string
+		expectedError string
+	}{
+		{
+			input:         []string{"daemon_windows_test_fakeservice"},
+			expectedError: "failed to open service daemon_windows_test_fakeservice",
+		},
+		{
+			input:         []string{"daemon_windows_test_fakeservice1", "daemon_windows_test_fakeservice2"},
+			expectedError: "failed to open service daemon_windows_test_fakeservice1",
+		},
+		{
+			input:         []string{existingService, "daemon_windows_test_fakeservice"},
+			expectedError: "failed to open service daemon_windows_test_fakeservice",
+		},
+	} {
+		t.Run(strings.Join(testcase.input, ";"), func(t *testing.T) {
+			err := ensureServicesInstalled(testcase.input) //abstract effect-----------------------------------------------------------------------------------------------------------------------------
+			// Проверяем наличие асбатрктного эффекта (возникновение ошибки
+			if err == nil {
+				t.Fatalf("expected error for input %v", testcase.input)
+			}
+			// А вот это бы я совсем убрал, т.к. это должен проверять соответствующий модуль обработки ошибок
+			/*if !strings.Contains(err.Error(), testcase.expectedError) {
+				t.Fatalf("expected error %q to contain %q", err.Error(), testcase.expectedError)
+			}*/
+		})
+	}
+}
+```
+
 # Пример 5
 
