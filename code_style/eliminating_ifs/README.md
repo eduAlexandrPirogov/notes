@@ -231,6 +231,118 @@ func (j Journal) writeSynch(file *os.File) {
 
 Стало:
 ```go
+
+// Newjournal returns new instance of Journal
+func NewJournal() Journal {
+	cfg := server.JournalCfg
+	readInterval := cfg.ReadInterval[:len(cfg.ReadInterval)-1]
+	read, err := strconv.Atoi(string(readInterval))
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	if read == 0 {
+		return Journal{
+			File:        cfg.StoreFile,
+			WithRestore: cfg.Restore,
+			write:       writeSynch,
+			Restored:    map[string]tuples.Tupler{},
+			Channel:     make(chan []byte),
+		}
+	}
+
+	return Journal{
+		File:        cfg.StoreFile,
+		WithRestore: cfg.Restore,
+		write: func(read int) func(in chan []byte, file *os.File) {
+
+			return func(in chan []byte, file *os.File) {
+				defer file.Close()
+				writer := bufio.NewWriter(file)
+				read := time.NewTicker(time.Second * time.Duration(read))
+				for {
+					<-read.C
+					writeTo(in, writer)
+				}
+
+			}
+		}(read),
+		Restored: map[string]tuples.Tupler{},
+		Channel:  make(chan []byte),
+	}
+}
+
+// Journal writes data from channel to give file
+// Works like replication/ db.log journal
+type Journal struct {
+	File        string
+	WithRestore bool
+	write       func(in chan []byte, file *os.File)
+	Restored    map[string]tuples.Tupler
+	Channel     chan []byte
+}
+
+// Start make journal stats writing data to the given file in json format
+//
+// Pre-cond: j have file that can be modified
+//
+// Post-cond: data written to the file depending on the chosen mode
+// There are two modes: synch mode writes permanently data to file
+// delayed mode: writes data to the file once at the given period
+// Returns nil if success started otherwise returns error
+func (j Journal) Start() error {
+	file, err := j.openWriteFile()
+	if err != nil {
+		return err
+	}
+
+	go j.write(j.Channel, file)
+	return nil
+}
+
+// readByTimer writes data once in a given period from channel
+//
+// Pre-cond: given file to write data
+//
+// Post-cond: data written to the file
+func writeDelayed(writeInterval int, file *os.File) func(in chan []byte, file *os.File) {
+	defer file.Close()
+	writer := bufio.NewWriter(file)
+	read := time.NewTicker(time.Second * time.Duration(writeInterval))
+	return func(in chan []byte, file *os.File) {
+		for {
+			<-read.C
+			writeTo(in, writer)
+		}
+	}
+
+}
+
+// NewWriter writes data every time when channel got new data
+//
+// Pre-cond: given file to write data
+//
+// Post-cond: data written to the file
+func writeSynch(in chan []byte, file *os.File) {
+	defer file.Close()
+	writer := bufio.NewWriter(file)
+	for {
+		writeTo(in, writer)
+	}
+
+}
+
+func writeTo(in chan []byte, writer *bufio.Writer) {
+	for {
+		if bytes, ok := <-in; ok {
+			writer.Write(append(bytes, '\n'))
+			writer.Flush()
+		} else {
+			break
+		}
+	}
+}
+
 ```
 
 # Пример 3
