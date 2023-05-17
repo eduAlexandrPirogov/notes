@@ -144,7 +144,7 @@ GetField(key string) (interface{}, bool)
 
 # Пример 2
 
-Было:
+Проблема следующего примера заключается в выборе записи реплики (синхронная или с задержкой, в зависимости от ReadInterval):
 ```go
 
 // Journal writes data from channel to give file
@@ -170,6 +170,7 @@ func (j Journal) Start() error {
 	if err != nil {
 		return err
 	}
+	// unnecessary if-else
 	if j.ReadInterval == 0 {
 		go func() {
 			j.writeSynch(file)
@@ -223,6 +224,10 @@ func (j Journal) writeSynch(file *os.File) {
 
 }
 ```
+
+Чтобы избавиться от if-ов, тут можно пойти несколькими путями:
+1) Создать интерфейс Journaler, и сделать два отдельных вида SynchJournal и DelayedJournal
+2) Создать АТД Journal, который будет встроен в SynchJournal или DelayedJournal у каждого из которых будет соответствующих метод write
 
 Стало:
 ```go
