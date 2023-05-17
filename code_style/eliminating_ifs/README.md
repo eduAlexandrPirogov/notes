@@ -81,6 +81,33 @@ type Tupler interface {
 ```
 
 ```go
+// Struct to represent gauge metrics as tuple in FP style
+type GaugeState struct {
+	Name  string   `json:"id"`              //Metric name
+	Type  string   `json:"type"`            // Metric type: gauge or counter
+	Value *float64 `json:"value,omitempty"` //Metric's val if passing counter
+	Hash  string   `json:"hash,omitempty"`
+}
+
+// Struct to represent Counter metrics as tuple in FP style
+type CounterState struct {
+	Name  string `json:"id"`              //Metric name
+	Type  string `json:"type"`            // Metric type: gauge or counter
+	Value *int64 `json:"delta,omitempty"` //Metric's val if passing counter
+	Hash  string `json:"hash,omitempty"`
+}
+```
+
+```go
+// Serializable representation of metric
+type Metrics struct {
+	ID    string   `json:"id"`              //Metric name
+	MType string   `json:"type"`            // Metric type: gauge or counter
+	Delta *int64   `json:"delta,omitempty"` //Metric's val if passing counter
+	Value *float64 `json:"value,omitempty"` //Metric's val if passing gauge
+	Hash  string   `json:"hash,omitempty"`
+}
+
 func (m Metrics) ToTuple() tuples.Tupler {
 	var tuple tuples.Tupler
 	switch m.MType {
@@ -100,6 +127,7 @@ func (m Metrics) ToTuple() tuples.Tupler {
 
 	return tuple
 }
+
 ```
 
 
