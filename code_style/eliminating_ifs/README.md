@@ -145,9 +145,88 @@ GetField(key string) (interface{}, bool)
 # Пример 2
 
 Было:
+```go
+
+// Journal writes data from channel to give file
+// Works like replication/ db.log journal
+type Journal struct {
+	File         string
+	WithRestore  bool
+	ReadInterval int
+	Restored     map[string]tuples.Tupler
+	Channel      chan []byte
+}
+
+// Start make journal stats writing data to the given file in json format
+//
+// Pre-cond: j have file that can be modified
+//
+// Post-cond: data written to the file depending on the chosen mode
+// There are two modes: synch mode writes permanently data to file
+// delayed mode: writes data to the file once at the given period
+// Returns nil if success started otherwise returns error
+func (j Journal) Start() error {
+	file, err := j.openWriteFile()
+	if err != nil {
+		return err
+	}
+	if j.ReadInterval == 0 {
+		go func() {
+			j.writeSynch(file)
+		}()
+	} else {
+		go func() {
+			j.writeDelayed(file)
+		}()
+	}
+	return nil
+}
+
+// readByTimer writes data once in a given period from channel
+//
+// Pre-cond: given file to write data
+//
+// Post-cond: data written to the file
+func (j Journal) writeDelayed(file *os.File) {
+	defer file.Close()
+	writer := bufio.NewWriter(file)
+	read := time.NewTicker(time.Second * time.Duration(j.ReadInterval))
+	for {
+		<-read.C
+		for {
+			if bytes, ok := <-j.Channel; ok {
+				writer.Write(append(bytes, '\n'))
+				writer.Flush()
+			} else {
+				break
+			}
+		}
+	}
+}
+
+// NewWriter writes data every time when channel got new data
+//
+// Pre-cond: given file to write data
+//
+// Post-cond: data written to the file
+func (j Journal) writeSynch(file *os.File) {
+	defer file.Close()
+	writer := bufio.NewWriter(file)
+	for {
+		if bytes, ok := <-j.Channel; ok {
+			writer.Write(append(bytes, '\n'))
+			writer.Flush()
+		} else {
+			break
+		}
+	}
+
+}
+```
 
 Стало:
-
+```go
+```
 
 # Пример 3
 
