@@ -158,7 +158,7 @@ switch v := i.(type) {
 	}
 ```
 
-Мне это очень не нравится, и я не хотел, чтобы в коде, когда я беру из 
+Мне это очень не нравится, и я не хотел, чтобы клиент брал поле из типа, реализующий Tupler, в добавок писал switch:
 
 ```go
 // GetField returns value by key of tuple.
@@ -170,12 +170,14 @@ switch v := i.(type) {
 // Otherwise return nil and bool = false
 func (t Tuple) GetField(key string) (interface{}, bool) {
 	if val, ok := t.Fields[key]; ok {
-		return val, true
+		return val, true // problem that interface{} must be asserted
 	}
 	return nil, false
 }
 ```
 
+Я решил пойти по-иному пути в данном случае, и, как мне кажется, он более правильный. 
+Я добавил отдельные методы, которые достают определенный тип из Tupler'а:
 ```go
 package tuples
 
@@ -223,6 +225,9 @@ func ExtractFloat64Pointer(field string, t Tupler) *float64 {
 }
 
 ```
+
+То есть я полностью изменил с логику с "взять поле, удостовериться в его типе и его корректном значении", на "достать значение из поля". 
+Тут вопрос в том еще, стоит ли бросать panic, или возвращать какое-то дефолтное значение (оставил 2-ое).
 
 # Пример 3
 
