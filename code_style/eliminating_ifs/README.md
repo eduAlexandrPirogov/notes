@@ -228,7 +228,9 @@ func (j Journal) writeSynch(file *os.File) {
 Чтобы избавиться от if-ов, тут можно пойти несколькими путями:
 1) Создать интерфейс Journaler, и сделать два отдельных вида SynchJournal и DelayedJournal
 2) Создать АТД Journal, который будет встроен в SynchJournal или DelayedJournal у каждого из которых будет соответствующих метод write
+3) Создать функции, которые будут добавлены в структуру в зависимости от данного интервала
 
+Реализуем 3-ий способ, так как мне кажется от более простым:
 Стало:
 ```go
 
@@ -240,12 +242,12 @@ func NewJournal() Journal {
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
-
+        // От if можно было бы избавиться, если бы Ticker при 0 не выбрасывал panic...
 	if read == 0 {
 		return Journal{
 			File:        cfg.StoreFile,
 			WithRestore: cfg.Restore,
-			write:       writeSynch,
+			write:       writeSynch, //function-value
 			Restored:    map[string]tuples.Tupler{},
 			Channel:     make(chan []byte),
 		}
@@ -254,6 +256,7 @@ func NewJournal() Journal {
 	return Journal{
 		File:        cfg.StoreFile,
 		WithRestore: cfg.Restore,
+		//function with closure
 		write: func(read int) func(in chan []byte, file *os.File) {
 
 			return func(in chan []byte, file *os.File) {
@@ -300,24 +303,6 @@ func (j Journal) Start() error {
 	return nil
 }
 
-// readByTimer writes data once in a given period from channel
-//
-// Pre-cond: given file to write data
-//
-// Post-cond: data written to the file
-func writeDelayed(writeInterval int, file *os.File) func(in chan []byte, file *os.File) {
-	defer file.Close()
-	writer := bufio.NewWriter(file)
-	read := time.NewTicker(time.Second * time.Duration(writeInterval))
-	return func(in chan []byte, file *os.File) {
-		for {
-			<-read.C
-			writeTo(in, writer)
-		}
-	}
-
-}
-
 // NewWriter writes data every time when channel got new data
 //
 // Pre-cond: given file to write data
@@ -344,6 +329,10 @@ func writeTo(in chan []byte, writer *bufio.Writer) {
 }
 
 ```
+
+В данном случае, в конструкторе у меня будет создавать соответствующая функция для записи.
+Если интервал будет представлять из себя некоторую логику (допустим, будут по дня, или день-два-день), то тогда я бы создал мапу с объектом интервала и значением функции, 
+и из мапы, в зависимости от типа интервала, брал нужную функцию записи.
 
 # Пример 3
 
