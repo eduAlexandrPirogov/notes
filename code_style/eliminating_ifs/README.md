@@ -2,7 +2,8 @@
 
 # Пример 1
 
-Было:
+Прохожу курсн на Яндексе, и там есть такой проект -- собираются два типа показателей counter и gauge, и нужно их передавать на сервер.
+У нас имеется такая изначальная структура:
 ```go
 
 // Serializable representation of metric
@@ -13,14 +14,18 @@ type Metrics struct {
 	Value *float64 `json:"value,omitempty"` //Metric's val if passing gauge
 	Hash  string   `json:"hash,omitempty"`
 }
+```
 
+И отдельные структуры для каждой измерительной метрики:
+```
+//counter
 type PollCount counter // Count of times when Metrics was collected
 
 type Polls struct {
 	PollCount PollCount
 }
 
-//----
+//gauge
 type FreeMemory gauge
 type CPUutilization1 gauge
 type TotalMemory gauge
@@ -31,9 +36,17 @@ type OpsUtil struct {
 	TotalMemory     TotalMemory
 }
 ```
+Ситуация была сложная тем, что когда данные приходили на сервер, на две эти структуры был один json, которые делался из Metrics (см. выше).
+Из-за этого по коду сервера постоянно были проверки:
 
-Стало:
+if metric.type == "gauge" ...
+else if metric.type == "counter" ...
+else ...
 
+Такие if-ы расползилсь по всем "уровням" архитектуры, и я решил эту проблему следующим образом.
+
+Я подумал, что если у нас один json, структура которого известа, и она едина для всех типов метрик, то можно представить этот json в виде кортежа.
+Создал интерфейс для поддержки кортежей:
 ```go
 
 type Tupler interface {
@@ -65,8 +78,9 @@ type Tupler interface {
 	// Otherwise return nil and error
 	Aggregate(with Tupler) (Tupler, error)
 }
+```
 
-
+```go
 func (m Metrics) ToTuple() tuples.Tupler {
 	var tuple tuples.Tupler
 	switch m.MType {
