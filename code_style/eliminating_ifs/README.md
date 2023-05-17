@@ -160,8 +160,69 @@ switch v := i.(type) {
 
 Мне это очень не нравится, и я не хотел, чтобы в коде, когда я беру из 
 
-Было:
+```go
+// GetField returns value by key of tuple.
+//
+// Pre-cond: given key
+//
+// Post-cond: returns value of field.
+// If field is exists with key returns val and bool = true
+// Otherwise return nil and bool = false
+func (t Tuple) GetField(key string) (interface{}, bool) {
+	if val, ok := t.Fields[key]; ok {
+		return val, true
+	}
+	return nil, false
+}
+```
 
+```go
+package tuples
+
+// ExtractString extracts string field from tuple
+//
+// Pre-cond: given field to extract and tuple to extract from
+//
+// Post-cond: extracts string value of fields.
+// If field no exists or field is not string, return empty string
+func ExtractString(field string, t Tupler) string {
+	f, ok := t.GetField(field)
+	if !ok {
+		return ""
+	}
+
+	return f.(string)
+}
+
+// ExtractString extracts pointer to int64 field from tuple
+//
+// Pre-cond: given field to extract and tuple to extract from
+//
+// Post-cond: extracts pointer to int64  value of fields.
+// If field no exists or field is not pointer to int64 , return nil
+func ExtractInt64Pointer(field string, t Tupler) *int64 {
+	f, ok := t.GetField("value")
+	if !ok {
+		return nil
+	}
+	return f.(*int64)
+}
+
+// ExtractString extracts pointer to float64 field from tuple
+//
+// Pre-cond: given field to extract and tuple to extract from
+//
+// Post-cond: extracts pointer to float64  value of fields.
+// If field no exists or field is not pointer to float64 , return nil
+func ExtractFloat64Pointer(field string, t Tupler) *float64 {
+	f, ok := t.GetField("value")
+	if !ok {
+		return nil
+	}
+	return f.(*float64)
+}
+
+```
 
 # Пример 3
 
