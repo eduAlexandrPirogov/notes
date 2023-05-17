@@ -80,6 +80,8 @@ type Tupler interface {
 }
 ```
 
+Создал для каждого вида метрки соответствующие АТД, реализующие интерфейс Tupler
+
 ```go
 // Struct to represent gauge metrics as tuple in FP style
 type GaugeState struct {
@@ -98,6 +100,7 @@ type CounterState struct {
 }
 ```
 
+Поскольку на сервер приходит единый, json, то все if-ы уходят в "конструкто" то Tuple:
 ```go
 // Serializable representation of metric
 type Metrics struct {
@@ -127,8 +130,16 @@ func (m Metrics) ToTuple() tuples.Tupler {
 
 	return tuple
 }
-
 ```
+
+То есть, на сервер приходит json, который анмаршалится в Metrics, а та в свою очередь, приводит инстант Metrics к соответствующемц виду кортежа.
+Теперь, весь сервер у меня работает с полиморфным кортежем, так устранил около 20 if-ов.
+Единственный минус, который можно отметить, это метод:
+```go
+GetField(key string) (interface{}, bool)
+```
+
+вот тут без if-а не обойтись, к сожалению таков идиоматизм в Go, но с Pattern matching вообще была бы красота :)
 
 
 # Пример 2
