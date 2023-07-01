@@ -127,3 +127,37 @@ void RequestHandler::handleRequest(class PutCommand* command)
 };
 ```
 Пример 3
+
+```cpp
+GraphBuilderParamCtrlsPanel::GraphBuilderParamCtrlsPanel(wxWindow* param, std::vector<Json*>& query_result, GraphBuilderPanel* graphMainPanel)
+	: wxPanel(param, wxID_ANY),graphMainPanel(graphMainPanel), query_result(query_result)
+{
+	create_graph = new wxButton(this, 30001, "Ïîêàçàòü", wxPoint(15, 15));
+	x_param = new wxComboBox(this, 30002, wxEmptyString, wxPoint(15, 50));
+	y_param = new wxComboBox(this, 30003, wxEmptyString, wxPoint(15, 100));
+	wxArrayString choices;
+	choices.Add("Òî÷å÷íûé");
+	choices.Add("Ëèíèè");
+	choices.Add("Ñòîëáöû");
+	graph_type = new wxRadioBox(this, 30004, "Òèï ãðàôèêà", wxPoint(15, 150), wxDefaultSize, choices);
+
+	/*where_param = new wxComboBox(this, 30004, wxEmptyString, wxPoint(100, 15));
+	equal_param = new wxComboBox(this, 30005, wxEmptyString, wxPoint(200, 15));;
+
+	equals_to = new wxTextCtrl(this, 30006, wxEmptyString, wxPoint(300, 15));*/
+	graph_title = new wxTextCtrl(this, 30006, "Ââåäèòå íàçâàíèå ãðàôèêà", wxPoint(175, 15));
+
+	picker = new wxColourPickerCtrl(this, 30015, wxColour(150,150,150), wxPoint(100,15));
+	sizer = new wxBoxSizer(wxVERTICAL);
+
+	sizer->Add(create_graph, 0, wxEXPAND | wxALL, 15);
+	sizer->Add(x_param, 0, wxEXPAND | wxALL, 15);
+	sizer->Add(y_param, 0, wxEXPAND | wxALL, 15);
+	sizer->Add(graph_type, 0, wxEXPAND | wxALL, 15);
+	sizer->Add(graph_title, 0, wxEXPAND | wxALL, 15);
+	sizer->Add(picker, 0, wxEXPAND | wxALL, 15);
+	SetSizerAndFit(sizer);
+}
+
+
+```
