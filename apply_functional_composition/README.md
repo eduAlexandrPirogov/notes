@@ -62,3 +62,72 @@ func Turnover(s service.Service) int64 {
 Что это дало -- будет подробно описано в выводе.
 
 # Пример 2
+
+Иная неочеввидная область применения данного приема -- построения GUI, как например с помощью wxWidgets. Общий алгоритм построения GUI довольно прост -- создаем элемент, присваиваем ему панель 
+Panel, и на эту панель накидываем следующий элемент со своей панелью и так далее. Для подобной "компоновки" элементов у wxWidgets имелись два общих метода:
+
+1) wxPanel->Add(wxWidget, params...)
+2) SetSizeAndFit(wxPanel)
+
+В дипломном проекте, где я создавал GUI на плюсах, очень любил использовать наследование, которое достигало 3-4 уровней и присутствовал tight coupling. Получалась такая иерархия:
+
+wxPanel <-- wxSplittedHorizontalPanel <-- wxScrolledPanel <-- ... 
+
+
+Тут можно поступить очень интересно 
+следующим образом: 
+
+1) Для каждого используемого элемента создать функцию. Наприимер:
+
+```cpp
+wxButton* createButton(wxButton ... params) {
+   wxButton *btn = new wxButton()    
+   // Assigning params to btn
+   return btn
+}
+
+wxComboBox* createCombobox(wxComboBox ... params) {
+     // Assignng params to creating instance wxComboBox
+    return combobox
+}
+```
+C панелями функции были бы абсолютно такими же
+
+2) Для создания какого-либо элемента, использовал бы набор автономных вышеприведенных функций:
+
+```cpp
+wxPanel aggrQueryPanel = new wxPanel()
+aggreQueryPanel->Add(
+   (createSplittedPanel(params)->Append(
+      (createwxButton(params), 
+      createStatixText(params)
+    )
+)
+```
+
+Суть такова, что мы выполняем подобную композицию за счет функций, тем самым я избавляюсь от наследования + жирных конструкторов в классе, как например:
+
+```cpp
+AggrQueryPanel::wxScrolledPanel(wxWindow* parent, ReportMainPanel* mainReportParent) 
+	: wxScroll(parent, wxID_ANY)
+{
+	mainReportPanel = mainReportParent;
+	collection = new wxComboBox(this, 27000, wxEmptyString, wxPoint(15, 15));
+	exec = new wxButton(this, 27010, "Âûïîëíèòü çàïðîñ", wxPoint(15,50));
+	reset = new wxButton(this, 27011, "Íîâûé çàïðîñ", wxPoint(15, 75));
+	add_group_function = new wxButton(this, 27013, "Äîáàâèòü ôóíêöèþ", wxPoint(15, 100));
+	add_group_field = new wxButton(this, 27012, "Äîáàâèòü àãð. ïîëå", wxPoint(15, 125));
+	add_group_by_field = new wxButton(this, 27014, "Ãðóïïèðîâêà ïî", wxPoint(15, 150));
+	add_group_function->Disable();
+	add_group_field->Disable();
+
+	wxStaticText *st_func_type = new wxStaticText(this, wxID_ANY, "Ôóíêöèÿ", wxPoint(250, 5));
+	wxStaticText *st_aggr_field = new wxStaticText(this, wxID_ANY, "Àãðåãèðóåìîå ïîëå", wxPoint(400, 5));
+	wxStaticText *st_group_by = new wxStaticText(this, wxID_ANY, "Ðàçäåëÿåì ïî", wxPoint(550, 5));
+	wxStaticText *st_field_name = new wxStaticText(this, wxID_ANY, "Íàçâàíèå ïîëÿ", wxPoint(700, 5));
+}
+```
+
+
+# Пример 3
+
