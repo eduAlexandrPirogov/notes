@@ -143,20 +143,37 @@ func unmarshalMetrics(bytes []byte) []metrics.Metrics {
 ```
 
 
-# Пример 
+# Пример 4
 
 Было:
 
 ```go
+func ConvertToMetrics(m []Metrics) (tuples.TupleList, error) {
+	res := tuples.TupleList{}
+	for _, metric := range m {
+		tupl := metric.ToTuple()
+		res = res.Add(tupl)
+	}
+	return res, nil
+}
+
 ```
 
 Стало:
 
 ```go
+
+
+func ConvertToMetrics(m []Metrics) tuples.TupleList {
+	return fp.Reduce(
+		func(acc tuples.TupleList, metric Metrics) tuples.TupleList {
+			return acc.Add(metric.ToTuple())
+		}, tuples.TupleList{})(m)
+}
 ```
 
 
-# Пример 
+# Пример 5
 
 Было:
 
