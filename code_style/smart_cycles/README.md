@@ -178,9 +178,35 @@ func ConvertToMetrics(m []Metrics) tuples.TupleList {
 Было:
 
 ```go
+
+func (d *DefaultHandler) verifyHash(metrcs []metrics.Metrics) error {
+	var err error = nil
+	for _, metric := range metrcs {
+		switch metric.MType {
+		case "counter":
+			err = d.verifyCounterHash(metric)
+		case "gauge":
+			err = d.verifyGaugeHash(metric)
+		default:
+			err = errors.New("not implemeneted")
+		}
+	}
+	return err
+}
 ```
 
 Стало:
 
 ```go
+
+var action map[string]func(*DefaultHandler, metrics.Metrics) error = map[string]func(*DefaultHandler, metrics.Metrics) error{
+	"counter": verifyCounterHash,
+	"gauge":   verifyGaugeHash,
+}
+
+func (d *DefaultHandler) verifyHash(metrcs []metrics.Metrics) []error {
+	return fp.Map(func(m metrics.Metrics) error {
+		return action[m.MType](d, m)
+	})(metrcs)
+}
 ```
