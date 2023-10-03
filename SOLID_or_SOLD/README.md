@@ -37,4 +37,99 @@ type BookingStorer interface {
 К тому же, может придти задача, чтобы добавить в BookingStorer метод CarChoosedWithCar(car.Car) error. Интерфейс станет еще жирнее, а тесты придется дополнять.
 
 Хорошо, проблема выделена, последствия понятны, но что с этим можно сделать конкретно в Go?
-Как было сказано ранее, к сожалению в Go пока что отсутствует возможность объединения интерфейсах через джеенерики. 
+Как было сказано ранее, к сожалению в Go пока что отсутствует возможность объединения интерфейсах через дженерики. И все же есть способ имитровать подобное поведение.
+Для начала приведу часть компонентов, которые используют данные интерфейс:
+
+```go
+package kernel
+
+func ChooseCarBooking(b entity.Booking, s db.BookingStorer) error {
+	return s.CarChoosed(b)
+}
+```
+
+Начнем с простого. При тестировании данной функции, мне не хочется имплементировать все методы кроме CarChoosed(entity.Booking). Можно сделать вот так:
+
+```go
+package kernel
+
+func ChoosrCarBooking(b entity.Booking, s interface{
+   CarChoosed(entity.Booking)
+}) error {
+   return s.CarChoosed(b)
+}
+
+Мы просто заменили s db.BookingStorer на interface{ CarChoosed(entity.Booking)}. Теперь, мне не требуется реализовывать весь клад методов для тестирования, да и выглядит опрятно.
+Кажется, что пример простой и искусственный? Хорошо, вот ещё один пример:
+
+```go
+
+// Interface for btable
+type BookingTabler interface {
+	Approve(entity.Booking) error
+	Cancel(entity.Booking) error
+	Choose(entity.Booking) error
+	Create(entity.Booking) error
+	ExistsInTable(entity.Booking) bool
+}
+
+type watcher struct {
+	s     db.BookingStorer
+	table BookingTabler
+}
+
+func Approve(b entity.Booking, w *watcher) error {
+	if !w.table.ExistsInTable(b) {
+		return fmt.Errorf("cant approve not existing booking")
+	}
+
+	tableErr := w.table.Approve(b)
+	if tableErr != nil {
+		return tableErr
+	}
+
+	dbErr := w.s.Approved(b)
+	if dbErr != nil {
+		return dbErr
+	}
+
+	return nil
+}
+```
+
+watcher имеет огромные два встроенных интерфейса, которые не прибавляют гибкости и устойчивости, и , замени их на обычные структуры, разницы не было бы.
+Можно сделать вот так:
+
+```go
+// Interface for btable
+type BookingTabler interface {
+	Approve(entity.Booking) error
+	Cancel(entity.Booking) error
+	Choose(entity.Booking) error
+	Create(entity.Booking) error
+	ExistsInTable(entity.Booking) bool
+}
+
+type watcher struct {
+	s     db.BookingStorer
+	table BookingTabler
+}
+
+func Approve(b entity.Booking, w *watcher) error {
+	if !w.table.ExistsInTable(b) {
+		return fmt.Errorf("cant approve not existing booking")
+	}
+
+	tableErr := w.table.Approve(b)
+	if tableErr != nil {
+		return tableErr
+	}
+
+	dbErr := w.s.Approved(b)
+	if dbErr != nil {
+		return dbErr
+	}
+
+	return nil
+}
+```
