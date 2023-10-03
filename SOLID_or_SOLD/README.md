@@ -60,7 +60,40 @@ func ChoosrCarBooking(b entity.Booking, s interface{
 }
 
 Мы просто заменили s db.BookingStorer на interface{ CarChoosed(entity.Booking)}. Теперь, мне не требуется реализовывать весь клад методов для тестирования, да и выглядит опрятно.
-Кажется, что пример простой и искусственный? Хорошо, вот ещё один пример:
+Объединение довольно просто имитировать:
+Было:
+```go
+// EventSender -- интерфейс
+func RegisterManager(m client.Manager, e events.EventSender) (client.Manager, error) {
+	err :=  e.RegisterManager(m)
+ 	e.StoreError(err)
+	return err
+}
+```
+
+Стало:
+```go
+// EventSender -- интерфейс
+func RegisterManager(m client.Manager, e interface{
+    RegisterManager(client.manager) error
+    StoreError(error)
+}) (client.Manager, error) {
+	err :=  e.RegisterManager(m)
+ 	e.StoreError(err)
+	return err
+}
+```
+
+Насколько предложенный мною метод имитации множествонного наследования/объединения интерфейсов хорош? На самом деле, областей применения у него не так много. Рассмотрим следующий пример:
+
+Было:
+```go
+func RegisterManager(m client.Manager, c client.ManagerHandler, s db.ActionStorer) (client.Manager, error) {
+	err :=  c.RegisterManager(m)
+ 	s.StoreError(err)
+	return err
+}
+```
 
 ```go
 
@@ -74,7 +107,9 @@ type BookingTabler interface {
 }
 
 type watcher struct {
+	// interface
 	s     db.BookingStorer
+	// interface
 	table BookingTabler
 }
 
@@ -97,25 +132,20 @@ func Approve(b entity.Booking, w *watcher) error {
 }
 ```
 
-watcher имеет огромные два встроенных интерфейса, которые не прибавляют гибкости и устойчивости, и , замени их на обычные структуры, разницы не было бы.
-Можно сделать вот так:
+Имеется watcher интерфейс, и, для его тестирования, хотелось бы использовать вышеприведенный метод. 
+Казалось бы, для этого достаточно вложенного интерфейса в параметрах Approve, что-то вроде следующего:
 
 ```go
-// Interface for btable
-type BookingTabler interface {
-	Approve(entity.Booking) error
-	Cancel(entity.Booking) error
-	Choose(entity.Booking) error
-	Create(entity.Booking) error
-	ExistsInTable(entity.Booking) bool
-}
-
-type watcher struct {
-	s     db.BookingStorer
-	table BookingTabler
-}
-
-func Approve(b entity.Booking, w *watcher) error {
+func Approve(b entity.Booking, w interface{
+	// Nested interface
+	table interface{
+      		ExistsInTable(entity.Booking)
+   	}
+	// Nested interface
+   	s interface{
+    		Approve(entity.Booking)
+   	}
+}) error {
 	if !w.table.ExistsInTable(b) {
 		return fmt.Errorf("cant approve not existing booking")
 	}
@@ -133,3 +163,51 @@ func Approve(b entity.Booking, w *watcher) error {
 	return nil
 }
 ```
+
+но в Go так нельзя :)
+
+```go
+func someFunc(x interface{
+   y interface {Call()} // !INVALID
+})() {
+   x.y.Call()
+}
+``` 
+
+Ну и ещё пример кода, где я все-таки использовал подход с интерфейсами:
+
+Было
+```go
+func Read(s Storer, state tuples.Tupler, l logg.Logger) (tuples.TupleList, error) {
+	l.InfoWrite(states)
+	states, err := s.Read(state)
+	l.InfoWrite(states, err)
+	if err != nil {
+		return tuples.TupleList{}, err
+	}
+
+	return states, nil
+}
+```
+
+Стало
+```go
+func Read(s Storer, state tuples.Tupler, l interface{
+    LogWrite(x ...any)
+}) (tuples.TupleList, error) {
+	l.LogWrite(states)
+	states, err := s.Read(state)
+	l.LogWrite(states, err)
+	if err != nil {
+		return tuples.TupleList{}, err
+	}
+
+	return states, nil
+}
+```
+
+Если потребуется вести лог не только для Info, но и для Warn/Error, то мне не составит труда добавить эти методы в интерфейс.
+
+
+По итогу.
+
