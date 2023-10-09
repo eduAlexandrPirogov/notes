@@ -2,6 +2,10 @@
 
 # Пример 1
 
+Я любитель создать в Go функциональный пакет с функциями высшего порядка. Они редко изменяются, в основном дополняются, 
+применимы на протяжении всего проекта, да и читабельность кода повышают. Не припомню случая, чтобы мне приходилось
+изменять какую-либо функция:
+
 ```go
 package function
 
@@ -29,11 +33,47 @@ func CompareBoolssDo(check bool, with bool, actionOnTrue onSuccessFunction) {
 }
 ```
 
+Последнее время стараюсь уделять время на чтения кода на Go на Github'е, и мне удивительно странно, почему так редко используются функции высшего порядка, ведь
+для добавления функциональности, нам достаточно написать лямбда-функцию, а не создавать новый пакет/изменять текущую реализация.
+
 # Пример 2
 
+Помимо функций высшего порядка, у меня имеется привычка писать пакеты в стиле std плюсов. Возможно я ошибаюсь и не имею достаточного
+опыта работы с std C++, но тендеция std там такова, что редко изменяется какой-либо компонент/алгоритм, а вносится новая его версия и со 
+временем старый компонент/алгоритм удаляется из нового стандарта.
+Основной мой мотив таков следования данной тендеции таков, что это
+1) перенимать опыт у разработчиков плюсов по поддержанию проекта (в данном случае языка С++)
+2) перенимать стиль написания компонентов
+
+Самый простой пример, но очень понятный:
 ```go
+
+package std
+
+type Iterator[T any] interface {
+	Next() bool
+	Curr() T
+}
+
+type Linked[T any] interface {
+	PushBack(item T)
+	PopFront() (T, bool)
+	Iterator() Iterator[T]
+}
+```
+
+Можно заявить, мол "это же паттерн итератор!". Не знаю, что появилось раньше: итераторы в С++ или паттерн "итератор", но реализация
+концепции итераторов в плюсах заложили в моей голове мысли, что при изменении способа прохода по контейнеру, не нужно менять его внутреннюю реализацию,
+а достаточно создать, подчеркиваю, дополнить, итератор (т.е. не нужно и итератор существующий менять).
+ 
+
+# Пример 3
+
+Это скорее будет очевидная вещь, но DI служит хорошей техников для поддержания OCP. 
+```go
+// Storer, tuple.Tupler, loggo.Logger -- интерфейсы
 func Read(s Storer, state tuples.Tupler, l loggo.Logger) (tuples.TupleList, error) {
-	l.InfoWrite(states)
+	l.InfoWrite(state)
 	states, err := s.Read(state)
 	l.InfoWrite(states, err)
 	if err != nil {
@@ -44,52 +84,31 @@ func Read(s Storer, state tuples.Tupler, l loggo.Logger) (tuples.TupleList, erro
 }
 ```
 
+Да, первоначально DI про ответвстенность создания объекта, но я вижу это тут аналогии с лямбда-функциями: 
+у нас есть параметр с определенным типом, и, как мы можем передать в качестве аргумента лямбда-функцию, которая удовлетворяет типа-параметру функции,
+также работает и с интерфейсами. То есть, если компонент, будь-то интерфейс или функция, имеет тот же тип, что и параметр, то это хороший способ поддерживать OCP.
 
-# Пример 3
-
+Хороший будет контраргумент моего примера, если спросить "что если интерфейс, например, loggo.Logger изменится -- не нужно ли нам переписывать текущую функцию, тем самым
+нарушая ОCP?". Я бы ответил, что
+1) 100% ОСР не всегда получится, но есть более крутой ответ
+2) Можно вспомнить прошлое занятие HW, про SOLID or SOLD, и сделать лямбда-интерфейс (название ниоткуда не взял, сам придумал):
 ```go
-// std hold interfaces for all data structures that used in this project
+func Read(s Storer, state tuples.Tupler, l interface{
+    LogWrite(x ...any)
+}) (tuples.TupleList, error) {
+	l.InfoWrite(state)
+	states, err := s.Read(state)
+	l.InfoWrite(states, err)
+	if err != nil {
+		return tuples.TupleList{}, err
+	}
 
-package std
-
-// Iterator incapsulate movement inside data structure elements in one way
-type Iterator[T any] interface {
-	// Next tells is there are elements to iterate
-	//
-	// if there are elements to iterate then return true
-	// otherwise returnes false
-	Next() bool
-
-	// Curr returnes current element of iterator
-	Curr() T
+	return states, nil
 }
+``` 
 
-type Linked[T any] interface {
-	// Add adds given elem at the tail
-	//
-	// Pre-cond: given element to add
-	//
-	// Post-cond: list's tail now is equal to given element
-	PushBack(item T)
-
-	// PopFront removes head of the list and returns item
-	//
-	// Pre-cond:
-	//
-	// Post-cond: if list isn't empty then returns value of head and true
-	// and moves head to the next elem
-	// Otherwise returns default value and false
-	PopFront() (T, bool)
-
-	// Iterator creates new instance of Iterator to inspect elements
-	//
-	// Pre-cond:
-	//
-	// Post-cond: returned instance of iterator
-	Iterator() Iterator[T]
-}
-
-```
+Да, что в первом случае, что во втором мы будем изменять реализацию, но, в случае заданным типом интерфейса, мы должны либо менять сам тип интерфейс, либо 
+дополнять закрытый для изменения пакет новой функций, а вот во втором случае, нам достаточно изменять лямбда-интерфейс, тем самым минимизируя нарушения ОСР!
 
 # Пример 4
 
