@@ -179,7 +179,7 @@ func someFunc(x interface{
 Было
 ```go
 func Read(s Storer, state tuples.Tupler, l logg.Logger) (tuples.TupleList, error) {
-	l.InfoWrite(states)
+	l.InfoWrite(state)
 	states, err := s.Read(state)
 	l.InfoWrite(states, err)
 	if err != nil {
