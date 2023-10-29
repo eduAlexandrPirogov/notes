@@ -108,16 +108,182 @@ func (g *MetricsTracker) InvokeTrackers() error {
 }
 ```
 
-# Пример 4
-
-
+Но лучше добавление экземпляров Metricable делать через явный метод.
 
 ```go
+func (g *MetricsTracker) Add(m metrics.Metricable) error {
+    ...
+}
 ```
+
+# Пример 4
+
+```go
+
+
+type Tupler interface {
+	// ToTuple converts type that implements Tupler interface to Tuple
+	ToTuple() Tupler
+
+	// SetField adds k/v pair to Tuple.
+	//
+	// Pre-cond: given key to be set and value for key
+	//
+	// Post-cond: return new tuple with updated field value
+	SetField(key string, value interface{}) Tupler
+
+	// GetField returns value by key of tuple.
+	//
+	// Pre-cond: given key
+	//
+	// Post-cond: returns value of field.
+	// If field is exists with key returns val and bool = true
+	// Otherwise return nil and bool = false
+	GetField(key string) (interface{}, bool)
+
+	// Aggregate aggregates to tuples to union them
+	//
+	// Pre-cond: given tuple to aggregate with
+	//
+	// Post-cond: returns new Tupler and error
+	// If success return Tuplers and error = nil
+	// Otherwise return nil and error
+	Aggregate(with Tupler) (Tupler, error)
+}
+
+type StoreWriter interface {
+	Write(tuple tuples.TupleList) (tuples.TupleList, error)
+}
+
+
+type StoreReader interface {
+	Read(cond tuples.Tupler) (tuples.TupleList, error)
+}
+
+
+// Write writes tupler to DB and return written state
+//
+// Pre-cond: given tuples to Write in given Storer
+//
+// Post-cond: if was written successfully returns NewTuple state and error nil
+// Otherwise returns emtyTuple and error
+func Write(s StoreWriter, states tuples.TupleList) (tuples.TupleList, error) {
+	newStates, err := s.Write(states)
+	if err != nil {
+		return tuples.TupleList{}, err
+	}
+
+	return newStates, nil
+}
+
+func StoreReader(s Storer, state tuples.Tupler) (tuples.TupleList, error) {
+	states, err := s.Read(state)
+	if err != nil {
+		return tuples.TupleList{}, err
+	}
+
+	return states, nil
+}
+```
+
+Тут функции просто принимают в качестве аргумента интерфейсы. Вообще интерфейсы так хорошо ложатся в парадигму ФП, что, как мне кажется, 
+такой подход используется уже в других функциональных языках. И я прекрасно понимаю, что это не лямбда-функции, это нечто более интересное, 
+с чем я пока не сталкивался, но кажется невероятно мощным интерфейсом.
 
 # Пример 5
 
+Я очень люблю реализовывать в разных язык подход std в С++, где DIP реализован с функциональной т.зр. как самый лучший и наглядный пример.
+
 ```go
+// std hold interfaces for all data structures that used in this project
+
+package std
+
+// Iterator incapsulate movement inside data structure elements in one way
+type Iterator[T any] interface {
+	// Next tells is there are elements to iterate
+	//
+	// if there are elements to iterate then return true
+	// otherwise returnes false
+	Next() bool
+
+	// Curr returnes current element of iterator
+	Curr() T
+}
+
+type Linked[T any] interface {
+	// Add adds given elem at the tail
+	//
+	// Pre-cond: given element to add
+	//
+	// Post-cond: list's tail now is equal to given element
+	PushBack(item T)
+
+	// PopFront removes head of the list and returns item
+	//
+	// Pre-cond:
+	//
+	// Post-cond: if list isn't empty then returns value of head and true
+	// and moves head to the next elem
+	// Otherwise returns default value and false
+	PopFront() (T, bool)
+
+	// Iterator creates new instance of Iterator to inspect elements
+	//
+	// Pre-cond:
+	//
+	// Post-cond: returned instance of iterator
+	Iterator() Iterator[T]
+}
+
+// AsSlice put all data structure's elemes into slice
+//
+// Pre-cond: given data structure's iterator
+//
+// Post-cond: returned slice of data structure's elements
+func AsSlice[T any](i Iterator[T]) []T {
+	res := make([]T, 0)
+	for i.Next() {
+		res = append(res, i.Curr())
+	}
+	return res
+}
 ```
+
+Подобные дают, как мне кажется, хорошую практику создавать не просто код, а формальную эко-систему. Ну например:
+
+```go
+package kernel
+
+import (
+	"autopark-service/internal/autopark/car"
+	"autopark-service/internal/db"
+	"autopark-service/internal/std"
+)
+
+// CreateBrand stores brand in storage
+//
+// Pre-cond: given brand entity and entity implementing BrandStorer interafce
+//
+// Post-cond: executes command to store given brand in given BrandStorer
+// returns nil if command executed successfully otherwise error
+func CreateBrand(b car.Brand, s db.BrandStorer) error {
+	return s.StoreBrand(b)
+}
+
+// ReadBrands return list from storage
+//
+// Pre-cond: given brand entity and entity implementing BrandStorer interafce
+//
+// Post-cond: executes command to read brands by given brand-pattern from given BrandStorer
+// returns nil if command executed successfully otherwise error
+func ReadBrands(pattern car.Brand, s db.BrandStorer) (std.Linked[car.Brand], error) {
+	return s.ReadBrands(pattern)
+}
+```
+
+В моем случае ядро приложения будет работать исключительно с типами данных, а не конкретными реализациями (разве что не считать примитивные типы данных).
+Kernel работает с типом BrandStorer и возвращает тип Linked. С помощью Iterator'a вы проходите через любую реализацию Linked. 
+С помощью дженериков, функциональных интерфейсов код становится невероятно гибким и менее связным. Ну не красота ли?)
 
 # Вывод
