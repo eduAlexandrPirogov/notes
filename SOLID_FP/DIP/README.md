@@ -68,15 +68,49 @@ func ChooseCarBooking(b entity.Booking, s interface{
 за счет того, что, лямбда-интерфейс более полиморфен (опять же вспоминаем занятие про правильный полиморфизжм), нежели обычный,
 данная функция ни-коим образом не зависит от деталей реализации, это прямой аналог функциям высшего порядка.
 
-
-Дальше приведу примеры, которые относятся к той или иной тенденции в моих проектах.
-
 # Пример 3
 
+В данном примере я волен передавать любые экземпляры, удовлетворяющие интерфейсу Metricable. Метод Read() считывает
+используемые ресурсы. Таким образом, при  потребности добавить новые экземпляры, которые будут считывать новый ресурс, мне 
+достаточно реализовать этот метод, а сбор метрик будет происходить вне зависимости от реализации новой метрики.
+По сути получилось внедрение функционального интерфейса.
+
 ```go
+// Metricalbes entities should update own metrics by Read() errpr method
+type Metricable interface {
+	Read() error
+}
+
+// MetricsTracker Holds all measures in slice
+type MetricsTracker struct {
+	Metrics []metrics.Metricable
+}
+
+// InvokeTrackers Pre-cond:
+//
+// Post-cond: requests measures to update own metrics.
+// returns 0 if success otherwise we can return error_code
+func (g *MetricsTracker) InvokeTrackers() error {
+	// #TODO add here grp and errgrp
+	var grp sync.WaitGroup
+	grp.Add(len(g.Metrics))
+	for _, tracker := range g.Metrics {
+		go func(tracker metrics.Metricable) {
+			defer grp.Done()
+			err := tracker.Read()
+			if err != nil {
+				log.Println(err)
+			}
+		}(tracker)
+	}
+	grp.Wait()
+	return nil
+}
 ```
 
 # Пример 4
+
+
 
 ```go
 ```
