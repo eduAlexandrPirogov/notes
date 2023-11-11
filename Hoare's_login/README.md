@@ -175,4 +175,240 @@ func SubnetValidate(next http.Handler) http.Handler {
 
 # Пример 4
 
+```go
+package tuples
+
+// ExtractString extracts string field from tuple
+//
+// Pre-cond: given field to extract and tuple to extract from
+//
+// Post-cond: extracts string value of fields.
+// If field no exists or field is not string, return empty string
+func ExtractString(field string, t Tupler) string {
+	f, ok := t.GetField(field)
+	if !ok {
+		return ""
+	}
+
+	return f.(string)
+}
+
+// ExtractString extracts pointer to int64 field from tuple
+//
+// Pre-cond: given field to extract and tuple to extract from
+//
+// Post-cond: extracts pointer to int64  value of fields.
+// If field no exists or field is not pointer to int64 , return nil
+func ExtractInt64Pointer(field string, t Tupler) *int64 {
+	f, ok := t.GetField("value")
+	if !ok {
+		return nil
+	}
+	return f.(*int64)
+}
+
+// ExtractString extracts pointer to float64 field from tuple
+//
+// Pre-cond: given field to extract and tuple to extract from
+//
+// Post-cond: extracts pointer to float64  value of fields.
+// If field no exists or field is not pointer to float64 , return nil
+func ExtractFloat64Pointer(field string, t Tupler) *float64 {
+	f, ok := t.GetField("value")
+	if !ok {
+		return nil
+	}
+	return f.(*float64)
+}
+```
+
+Используется везде, где требуется получить значение кортежа по ключу:
+```go
+func writeGauges(p *postgres, state tuples.Tupler) (tuples.TupleList, error) {
+	var val *float64
+	var mname, mtype string
+
+	// You can expose/fold brackets for better code reading
+	{
+		val = tuples.ExtractFloat64Pointer("value", state)                             <----------------------------
+		if val == nil {
+			return tuples.TupleList{}, errors.New("value must exists while writing")
+		}
+
+		mname = tuples.ExtractString("name", state)					<----------------------------	
+		mtype = tuples.ExtractString("type", state)					<----------------------------
+	}
+
+	rows, err := p.conn.Query(context.Background(), WriteMetric, mtype, mname, *val)
+	if err != nil {
+		return tuples.TupleList{}, err
+	}
+
+	return p.assembleGaugeState(rows)
+}
+```
+
+Тут сложно найти несостыковки, разве что если передать nil...но проверка на nil имеется до момента Экстракта значения по ключа.
+Вопрос в том, стоит ли внести проверки на nil в функции пакета tuples? Скорее да, так как возможна ситуация в теории, что это функции вызовут с nil,
+и спецификации не говорит ничего о nil.
+
 # Пример 5
+
+Последний большой пример, связанный с fsm:
+```go
+// bookingfsm represents FiniteStateMachine for booking.
+// Book can be on on the next states: created, choosed, approved ,cancel, finished.
+// Each of these states described below.
+package bookingfsm
+
+import (
+	"booking-service/internal/entity"
+	"context"
+	"fmt"
+
+	"github.com/looplab/fsm"
+	"github.com/rs/zerolog/log"
+)
+
+const (
+	StateCreated    = "created"  // Booking was created
+	StateChoosedCar = "choosed"  // Car for created booking was choosed. Can be performed only from StateCreated
+	StateApproved   = "approved" // Booking was approved. Can pe performed only from StateChoosedCar
+	StateCanceled   = "canceled" // Booking was canceled. Can be performed from StateCreated and StateChoosedCar
+	StateFinished   = "finished" // Booking was finished. Can be performed only from StateApproved
+)
+
+// BookingFSM is a wrapper for looplabfsm
+type BookingFSM struct {
+	Book entity.Booking
+	fsm  *fsm.FSM
+}
+
+// Created new BooingFSM instance
+//
+// Pre-cond: given id and userID
+//
+// Post-cond: instance was created and pointer to it was returned
+func New(id, userID int) *BookingFSM {
+	return &BookingFSM{
+		Book: entity.Booking{
+			ID:     id,
+			UserID: userID,
+		},
+		fsm: fsm.NewFSM(
+			StateCreated,
+			fsm.Events{
+				{Name: StateCreated, Src: []string{StateCreated}, Dst: StateCreated},
+				{Name: StateChoosedCar, Src: []string{StateCreated}, Dst: StateChoosedCar},
+				{Name: StateApproved, Src: []string{StateChoosedCar}, Dst: StateApproved},
+				{Name: StateCanceled, Src: []string{StateCreated, StateChoosedCar}, Dst: StateCanceled},
+				{Name: StateFinished, Src: []string{StateApproved}, Dst: StateFinished},
+			},
+			fsm.Callbacks{},
+		),
+	}
+}
+
+// Current return current state of BookingFSM
+func (b *BookingFSM) Current() string {
+	return b.fsm.Current()
+}
+
+// ChooseCar tries to perfom transformation to StateChoosedCar.
+// If transformation was performed successfully returns nil, otherwise returns error
+func (b *BookingFSM) ChooseCar() error {
+	err := b.fsm.Event(context.Background(), StateChoosedCar)
+	if err != nil {
+		log.Debug().Msgf("%v", err)
+		return err
+	}
+	fmt.Printf("Booking with id %d has choosen car. Current fsm state: %s\n", b.Book.ID, b.fsm.Current())
+	return nil
+}
+
+// Approve tries to perfom transformation to StateApproved
+// If transformation was performed successfully returns nil, otherwise returns error
+func (b *BookingFSM) Approve() error {
+	err := b.fsm.Event(context.Background(), StateApproved)
+	if err != nil {
+		log.Debug().Msgf("%v", err)
+		return err
+	}
+	fmt.Printf("Booking with id %d has approved. Current fsm state: %s\n", b.Book.ID, b.fsm.Current())
+	return nil
+}
+
+// Cancel tries to perfom transformation to StateCanceled.
+// If transformation was performed successfully returns nil, otherwise returns error
+func (b *BookingFSM) Cancel() error {
+	err := b.fsm.Event(context.Background(), StateCanceled)
+	if err != nil {
+		log.Debug().Msgf("cancel event called %v", err)
+		return err
+	}
+	fmt.Printf("Booking with id %d has canceled. Current fsm state: %s\n", b.Book.ID, b.fsm.Current())
+	return nil
+}
+
+// Finish tries to perfom transformation to StateFinished.
+// If transformation was performed successfully returns nil, otherwise returns error
+func (b *BookingFSM) Finish() error {
+	err := b.fsm.Event(context.Background(), StateFinished)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Booking with id %d has finished. Current fsm state: %s\n", b.Book.ID, b.fsm.Current())
+	return nil
+}
+
+// Booking returns copy of entity.Booking
+func (b *BookingFSM) Booking() entity.Booking {
+	return b.Book
+}
+```
+
+Корректность спецификаций fsm-ки не требует, как мне кажется, моих доказательств)
+
+И где используется, например, метод Choose:
+
+```go
+// Choose transform bookingFSM to StateChoosedCar
+//
+// Pre-cond: given entity.Boking with set userID and CarID
+//
+// Post-cond: if respective record exists -- trying to make
+// transformation and return result of transformation.
+// If record doesn't exists then returns error
+func (bt *btable) Choose(b entity.Booking) error {
+	bt.mutex.RLock()
+	defer bt.mutex.RUnlock()
+	if val, ok := bt.fsms[b.UserID]; ok {
+		bt.fsms[b.UserID].Book = b
+
+		err := val.ChooseCar()
+		if err != nil {
+			log.Warn().Msgf("%v", err)
+			return err
+		}
+	}
+	return nil
+}
+```
+
+А вот то, как используется эта фсм-ка, показывает, что если мы используется только корректно некоторый компонент системы, отражаем это в спецификациях, то у нас 
+В принципе невозможна некорректное выполнение спецификации.
+
+Метод Choose btable говорит, что пытается перевести fsm в следующиее состояние, и поскольку спецификации fsm никак не могут быть нарушены, то спецификации
+метода Choose btable также не могут быть нарушены в данном случае, так как они полностью зависят от результата работы fsm.
+
+
+# Вывод
+
+Хорошее напоминание о том, что пост-условие может быть истинным если и только если истинно пред-условие. В ФП с этим как-то проще, где можно писать чистые функции
+и явно разделять чистые функции от нечистых. В ООП ситуация осложняется тем, что обращение к внешнему миру происходит где-то внутри мутабельного состояние, которое
+тяжело отследить, да и спецификации могут этого "не донести" до клиента. Посему, было бы неплохо явно разграничивать отвественность за обращение во-внешний мир. Это первое.
+
+Второе, что я заметил, что все пред и постусловия у меня были написаны до этого (вошло в привычку). И, как мне показалось, их стоит писать не везде, а именно,
+где происходит взаимодействие с внешним миром. По-крайней мере это должно быть написано в документации. В коде я бы оставил лишь общее назначение куска кода.
+
+И да, когда мне тяжело написать хорошую спецификацию для участка кода, то тут хорошо подойдет fuzz-тестирование :) 
