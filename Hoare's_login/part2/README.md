@@ -165,22 +165,111 @@ type Comparable[T Comparable[T]] interface {
 
 # Пример 4
 
+Рассмотрим примеры, где достаточно изменить лишь спецификации, не меняя реализацию. 
 Было:
-```go
+```erl
+// Pre-cond: given ChannelID and additional parameters for request to make request to the channel
+// Post-cond: return the result of request
+make_request(ChId, ParamList) ->
+    metric:counter(?'A1S.METRIC.HTTP.ACCEPTED', [ChId]),
+    StopWatch = metric:stop_watch_millis(),
+    case (catch channel:call(ChId,{request,ParamList},infinity)) of
+        {ok, Response} ->
+            metric:timer_milli(?'A1S.METRIC.HTTP.SUCCESS', StopWatch(), [ChId]),
+            {html, Response};
+        {error, Error} ->
+            metric:timer_milli(?'A1S.METRIC.HTTP.FAILED', StopWatch(), [ChId]),
+            {html, "ERROR: " ++ Error};
+        _ ->
+            metric:timer_milli(?'A1S.METRIC.HTTP.FAILED', StopWatch(), [ChId]),
+            {html, "ERROR: System error"}
+    end.
 ```
 
+Пред-условия в данном сложно как-либо ослабить, так как к ним предъявление наименее строгие требования на данный момент.
+Они могли содержать "Дать айди СУЩЕСТВУЮЩЕГО канала" или иметь какой-то определенный вид параметров.
+
+Постуловия же следуюет уточнить, а именно вид результата: 
+
 Стало:
-```go
+```erl
+// Pre-cond: given ChannelID and additional parameters for request to make request to the channel
+// Post-cond: returns tuple with {ok, Response} or {html, ErrorMsg}	 <-------------------------
+make_request(ChId, ParamList) ->
+    metric:counter(?'A1S.METRIC.HTTP.ACCEPTED', [ChId]),
+    StopWatch = metric:stop_watch_millis(),
+    case (catch channel:call(ChId,{request,ParamList},infinity)) of
+        {ok, Response} ->
+            metric:timer_milli(?'A1S.METRIC.HTTP.SUCCESS', StopWatch(), [ChId]),
+            {html, Response};
+        {error, Error} ->
+            metric:timer_milli(?'A1S.METRIC.HTTP.FAILED', StopWatch(), [ChId]),
+            {html, "ERROR: " ++ Error};
+        _ ->
+            metric:timer_milli(?'A1S.METRIC.HTTP.FAILED', StopWatch(), [ChId]),
+            {html, "ERROR: System error"}
+    end.
 ```
 
 # Пример 5
 
 Было:
-```go
+```erl
+// Pre-cond: given decode type ('7bit', gsm or known encoding other type), message to decode and udhLen
+// Post-cond: returned decoded message
+decode('7bit',M,UdhLen) ->
+    BinMsg = if is_binary(M) -> M; true -> list_to_binary(M) end,
+    LeadingCount = case UdhLen rem 7 of
+                       0 -> -1;
+                       L -> L
+                   end,
+    M1 = add_leading_zeros(LeadingCount,BinMsg),
+    ClosingCount = case size(M1) rem 7 of
+                       0 -> -1;
+                       C -> 7-C
+                   end,
+    M2 = add_closing_zeros(ClosingCount,M1),
+    M3 = from_7bit(M2),
+    M4 = cut_off_closing_zeros(M3),
+    cut_off_leading_zeros(LeadingCount+1,M4);
+decode(gsm,M,_) ->
+    {_, UtfMsg} = gsm_to_utf16(if is_binary(M) -> M; true -> list_to_binary(M) end),
+    list_to_binary(iconv:convert("UTF-16BE", "UTF-8", binary_to_list(UtfMsg)));
+decode(Enc,M,_) ->
+    Msg = if is_binary(M) -> binary_to_list(M); true -> {error, M} end,
+    list_to_binary(iconv:convert(?ENCODING_NAME(Enc), "UTF-8", Msg)).
 ```
 
+Предусловия были ослаблены с конкретного типа кодирования до обобщенного, то к предусловиям предъявляется меньше требований.
+А вот постусловия были усилие с "декодированного сообщения", до "бинарное репрезентация сообщения" (в Erlang'e это всегда список битов).
+К тому же были обработаны вариантЫ, когда дан некорректный тип декодирования.
+
 Стало:
-```go
+```erl
+// Pre-cond: given desired decode type, message to decode and udhLen
+// Post-cond: returned binary representation of decoded message
+// If given incorrect decode type, returns error with given M
+decode('7bit',M,UdhLen) ->
+    BinMsg = if is_binary(M) -> M; true -> list_to_binary(M) end,
+    LeadingCount = case UdhLen rem 7 of
+                       0 -> -1;
+                       L -> L
+                   end,
+    M1 = add_leading_zeros(LeadingCount,BinMsg),
+    ClosingCount = case size(M1) rem 7 of
+                       0 -> -1;
+                       C -> 7-C
+                   end,
+    M2 = add_closing_zeros(ClosingCount,M1),
+    M3 = from_7bit(M2),
+    M4 = cut_off_closing_zeros(M3),
+    cut_off_leading_zeros(LeadingCount+1,M4);
+decode(gsm,M,_) ->
+    {_, UtfMsg} = gsm_to_utf16(if is_binary(M) -> M; true -> list_to_binary(M) end),
+    list_to_binary(iconv:convert("UTF-16BE", "UTF-8", binary_to_list(UtfMsg)));
+decode(Enc,M,_) ->
+    Msg = if is_binary(M) -> binary_to_list(M); true -> M end,
+    list_to_binary(iconv:convert(?ENCODING_NAME(Enc), "UTF-8", Msg)).
 ```
 
 # Вывод
