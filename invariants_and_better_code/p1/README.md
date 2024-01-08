@@ -1,6 +1,6 @@
 # Инварианты и качественный код (1)
 
-Поскльку в Go нет assert'ов в смысле С++ (https://golang.org/doc/faq#assertions), то вместо них я написал предикат, который в ложных случаях выдает панику.
+Поскольку в Go нет assert'ов в смысле С++ (https://golang.org/doc/faq#assertions), то вместо них я написал предикат, который в ложных случаях выдает панику.
 
 # Пример 1
 
@@ -224,3 +224,139 @@ case <-ctx.Done():
 
 # Пример 3
 
+Последний пример приведу из кода Docker'а. Есть следующая структура, у которой я убрал часть полей:
+
+```go
+// Container holds the structure defining a container object.
+type Container struct {
+	StreamConfig *stream.Config
+	// embed for Container to support states directly.
+	*State          `json:"State"`          // Needed for Engine API version <= 1.11
+	Root            string                  `json:"-"` // Path to the "home" of the container, including metadata.
+	BaseFS          containerfs.ContainerFS `json:"-"` // interface containing graphdriver mount
+	...
+
+	// MountLabel contains the options for the 'mount' command 
+	MountLabel             string
+	ProcessLabel           string
+	RestartCount           int
+	MountPoints            map[string]*volumemounts.MountPoint
+	...
+
+	// Fields here are specific to Unix platforms                                                                    
+	AppArmorProfile string
+	HostnamePath    string
+	...
+
+	// Fields here are specific to Windows
+	NetworkSharedContainerID string            `json:"-"`
+	SharedEndpointList       []string          `json:"-"`
+	LocalLogCacheMeta        localLogCacheMeta `json:",omitempty"`
+}
+```
+
+Обращаю внимание на MountLabel. Для работы с ними в репозитории есть следующие методы:
+
+```go
+// AddMountPointWithVolume adds a new mount point configured with a volume to the container.
+func (container *Container) AddMountPointWithVolume(destination string, vol volume.Volume, rw bool) {
+	volumeParser := volumemounts.NewParser()
+	container.MountPoints[destination] = &volumemounts.MountPoint{
+		Type:        mounttypes.TypeVolume,
+		Name:        vol.Name(),
+		Driver:      vol.DriverName(),
+		Destination: destination,
+		RW:          rw,
+		Volume:      vol,
+		CopyData:    volumeParser.DefaultCopyMode(),
+	}
+}
+
+// UnmountVolumes unmounts all volumes
+func (container *Container) UnmountVolumes(volumeEventLog func(name, action string, attributes map[string]string)) error {
+	var errors []string
+	for _, volumeMount := range container.MountPoints {
+		if volumeMount.Volume == nil {   		// <--------------------------------- !!!
+			continue
+		}
+
+		if err := volumeMount.Cleanup(); err != nil {
+			errors = append(errors, err.Error())
+			continue
+		}
+
+		attributes := map[string]string{
+			"driver":    volumeMount.Volume.DriverName(),
+			"container": container.ID,
+		}
+		volumeEventLog(volumeMount.Volume.Name(), "unmount", attributes)
+	}
+	if len(errors) > 0 {
+		return fmt.Errorf("error while unmounting volumes for container %s: %s", container.ID, strings.Join(errors, "; "))
+	}
+	return nil
+}
+```
+
+Я бы вынес здесь работу с mount'ами в отдельный пакет, не столько, чтобы разбить код на ответственности, сколько устранить недопустимого состояния:
+
+```go
+type Mount struct {
+	MountLabel             string
+	ProcessLabel           string
+	RestartCount           int
+	MountPoints            map[string]*volumemounts.MountPoint
+}
+```
+
+Опасность тут кроется в указателях мапы MountPoints. Зачем в методе UnmountVolumes нужна проверка на nil? Ещё при прохождении лайв-кодинга в Яндекс у меня выработалась привычка, что
+если в мапе в качестве ключа может выступать некое "нулевое значение" (ноль в случае, если в качестве ключа выступают числа; nil, если в качестве ключа выступают указатели т.д.), то если ключ равен
+этому нулевому значению, мы удаляем этот ключ. В данном случае, это выглядело бы примерно так:
+
+```go
+func (m* Mount) unmount(id string) {
+    if m.MountPoints[id] == nil {
+       delete(m.MountPoints, id)
+    }
+}
+```
+
+Мы не просто вынесли часть кода в отдельную структуру, но и сделали одно из возможных ее состояний невозможным, тем самым устранив множество проверок на nil.
+
+Вернемся к методу UnmountVoluems и строке, выполняющей проверку на nil:
+
+```go
+	for _, volumeMount := range container.MountPoints {
+		if volumeMount.Volume == nil {   		// <--------------------------------- !!!
+			continue
+		}
+```
+
+Вот тут ассерт с паникой подошел бы идеально. Раз уж мы вынесли работу с Mount'ами в отдельную структуру и подразумеваем, что эта структура не может хранить нулевые указатели, то асссерт будет лишним тому подтверждением
+(подтверждением нашим рассуждениям).
+
+
+```go
+	for _, volumeMount := range container.MountPoints {
+		f.AssertNotNil(volumeMount)
+```
+
+
+# По итогу
+
+Начну пожалуй с ассертов. Ассерты я пытался использовать ещё года 2 назад, работая джуном, но лишь на локальной разработке. Они присутствуют почти в любом языке или же их легко реализовать самому на свой вкус.
+Механизм, казалось бы, тривиальный, но у него есть важная особенность, которая помогает строить качественный и устойчивый код.  И речь не о том, что приложение упадет и мы поймем, в чем дело. Вспомним материал "4 признака 
+качественног кода", где шла речь о том, что каждая строка не просто должна следовать SRP, но ее пост-условие будет пред-условием для следующей. Так вот ассерты в данных ситуациях заходят, что называется "на ура". 
+Очень много ошибок ловил, используя эти ассерты. 
+Но использовать ассерты на стейдже...это больше выносится на обсуждение с командой. В командах, где больше 100 человек, мне кажется, это подход не подойдет, а вот где команды по 10 человек -- самое то. Но это уже домыслы, не более.
+
+Теперь касательно создания структур данных без недопустимого состояния. Во-первых, мне было сложно найти примеры, поскольку бОльшая часть проектов заключается в "перетаскивании json'чиков" и там, несмотря на то, что пишут код 
+с явным состоянием, применение этой техники будет избыточным (обычно файлы не превышают 2 тысяч строк кода). Подобное разбиение привнесет файлы по 100 строк кода и порой придется слишком часто перескакивать по файлам.
+Но вот что касается разработки не продуктовой, то этот метод обязателен к применению. В целом, если говорить он непродуктовой разработки, то тут идет тут работы больше с абстракциями: мы продумываем, какие компоненты
+будут отражать ту или иную часть внешнего мира в кодовой базе, как они будут взаимодействовать между собой. И чем дольше мы думаем над этим, тем больше декомпозируем наши компоненты, причем стараемся делать их такими, чтобы
+они были как можно более устойчивыми, безопасными. Несмотря на то, что количество файлом растет, но в данном случае это, как мне кажется будет оправданым. 
+
+И пугает тут больше не рост количества файлов, сколько способ взаимодействия наших компонентов. Рассмотрим тот же пример с отрезком и сдвигом. Что если, мы будем делать сдвиг не на дискретные единицы, а в процентах?
+Будем ли мы вносить "СдвигВПроцентах" в отдельный компонент? Будет ли Сдвиг в Процентах работать совместно со Сдвигом в Единицах (например сдвиг на 20% + 1)? 
+Представим, что мы создали два компонента СдвигПроценты и СдвигЕдинцицы. Тогда я бы думал не только над тем, как Отрезок будет взаимодействовать с компонентами Сдвига, но и над тем, как Сдвиги будут взаимодействовать между собой.
+И почему-то мне кажется, что ООП в этих моментах будет выглядеть слабо...
